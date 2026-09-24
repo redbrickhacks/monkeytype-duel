@@ -147,11 +147,16 @@ function shutdown(signal: string): void {
   console.log(
     JSON.stringify({ level: "info", message: "shutting down", signal }),
   );
+  server.close();
   for (const socket of sockets.clients) {
-    socket.terminate();
+    socket.close(1012, "Service restarting");
   }
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 8_000).unref();
+  setTimeout(() => {
+    for (const socket of sockets.clients) {
+      socket.terminate();
+    }
+    process.exit(0);
+  }, 500).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
