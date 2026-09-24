@@ -3,4 +3,5 @@ packages:
   - "backend"
   - "tribes-server"
   - "user-handler"
+  - "duel-app"
   - "packages/*"

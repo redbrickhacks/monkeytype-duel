@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "overrides": [
     {
-      "files": ["*.js", "*.cjs"],
+      "files": ["*.js", "*.cjs", "*.mjs"],
       "rules": {
         "typescript/strict-boolean-expressions": "off",
         "typescript/await-thenable": "off",

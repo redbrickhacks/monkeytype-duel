@@ -1,0 +1,5 @@
+data/
+dist-server/
+dist-web/
+node_modules/
+.env
