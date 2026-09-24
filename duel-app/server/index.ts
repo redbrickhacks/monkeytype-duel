@@ -147,6 +147,9 @@ function shutdown(signal: string): void {
   console.log(
     JSON.stringify({ level: "info", message: "shutting down", signal }),
   );
+  for (const socket of sockets.clients) {
+    socket.terminate();
+  }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 8_000).unref();
 }
