@@ -99,6 +99,7 @@ export class DuelDatabase {
       .prepare(`
       SELECT p.github_id, p.login, p.display_name, p.avatar_url,
              MAX(r.wpm) best_wpm,
+             (SELECT rr.raw FROM race_results rr WHERE rr.github_id=p.github_id ORDER BY rr.wpm DESC LIMIT 1) best_raw,
              (SELECT rr.accuracy FROM race_results rr WHERE rr.github_id=p.github_id ORDER BY rr.wpm DESC LIMIT 1) accuracy,
              COUNT(*) races, MAX(r.finished_at) last_played_at
       FROM race_results r JOIN profiles p ON p.github_id=r.github_id
@@ -113,6 +114,7 @@ export class DuelDatabase {
           displayName: String(value.display_name),
           avatarUrl: String(value.avatar_url),
           bestWpm: Number(value.best_wpm),
+          bestRaw: Number(value.best_raw),
           accuracy: Number(value.accuracy),
           races: Number(value.races),
           lastPlayedAt: Number(value.last_played_at),

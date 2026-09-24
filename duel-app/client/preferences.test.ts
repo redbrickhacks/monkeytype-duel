@@ -4,9 +4,19 @@ import {
   loadPreferences,
   PREFERENCES_KEY,
   validatePreferences,
+  themes,
 } from "./preferences";
 
 describe("preferences", () => {
+  it("loads the complete Monkeytype theme catalogue", () => {
+    expect(Object.keys(themes)).toHaveLength(187);
+    expect(themes["8008"]?.label).toBe("8008");
+    expect(themes["8008"]).toMatchObject({
+      bg: "#333a45",
+      main: "#f44c7f",
+    });
+    expect(themes.serika_dark?.label).toBe("Serika Dark");
+  });
   it("accepts valid values and replaces invalid fields independently", () => {
     const preferences = validatePreferences({
       ...defaultPreferences,

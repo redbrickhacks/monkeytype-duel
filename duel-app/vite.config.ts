@@ -1,4 +1,5 @@
 import { defineConfig } from "vite";
+import { resolve } from "node:path";
 
 export default defineConfig({
   root: "client",
@@ -6,6 +7,12 @@ export default defineConfig({
   build: {
     outDir: "../dist-web",
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        app: resolve(process.cwd(), "client/index.html"),
+        admin: resolve(process.cwd(), "client/admin.html"),
+      },
+    },
   },
   server: {
     port: 5173,

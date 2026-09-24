@@ -8,6 +8,8 @@ import { DuelDatabase } from "./database.js";
 import { ProfileError, resolveGithubProfile } from "./github.js";
 import { DuelRoom } from "./room.js";
 import { parseClientMessage } from "./validation.js";
+import { logEvent, recentLogs } from "./logger.js";
+import type { AdminTarget } from "../shared/protocol.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT ?? 3000);
@@ -44,8 +46,8 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
   if (req.method === "OPTIONS") {
     res.sendStatus(204);
     return;
@@ -75,6 +77,57 @@ app.get("/api/leaderboard", (_req, res) => {
 });
 app.get("/api/snapshot", (_req, res) => {
   res.json(room.snapshot());
+});
+
+function requireAdmin(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  const token = process.env.ADMIN_TOKEN;
+  if (token === undefined || token === "") {
+    res.status(503).json({ error: "Operator dashboard is not configured." });
+    return;
+  }
+  if (req.headers.authorization !== `Bearer ${token}`) {
+    res.status(401).json({ error: "Invalid operator token." });
+    return;
+  }
+  next();
+}
+
+app.get("/api/admin/status", requireAdmin, (req, res) => {
+  const after = Number(req.query.after ?? 0);
+  res.json({
+    snapshot: room.snapshot(),
+    clients: room.clientStatus(),
+    logs: recentLogs(Number.isFinite(after) ? after : 0),
+  });
+});
+
+app.post("/api/admin/action", requireAdmin, (req, res) => {
+  const body = req.body as { action?: unknown; target?: unknown };
+  const targets: AdminTarget[] = ["L", "R", "leaderboard", "all"];
+  if (
+    (body.action !== "reset" && body.action !== "refresh") ||
+    !targets.includes(body.target as AdminTarget)
+  ) {
+    res.status(400).json({ error: "Invalid operator action." });
+    return;
+  }
+  const target = body.target as AdminTarget;
+  if (body.action === "reset") {
+    if (target === "leaderboard") {
+      res
+        .status(400)
+        .json({ error: "The leaderboard has no station to reset." });
+      return;
+    }
+    room.forceReset(target);
+  } else {
+    room.forceRefresh(target);
+  }
+  res.json({ ok: true });
 });
 
 const staticDir = process.env.STATIC_DIR;
@@ -120,6 +173,11 @@ sockets.on("connection", (socket, request) => {
         room.handle(client, message);
       }
     } catch (error) {
+      logEvent(
+        "error",
+        client.side ?? "backend",
+        error instanceof Error ? error.message : "Invalid client message.",
+      );
       socket.send(
         JSON.stringify({
           type: "error",
@@ -132,21 +190,11 @@ sockets.on("connection", (socket, request) => {
 });
 
 server.listen(port, host, () =>
-  console.log(
-    JSON.stringify({
-      level: "info",
-      message: "monkeytype duel listening",
-      host,
-      port,
-      databasePath,
-    }),
-  ),
+  logEvent("info", "backend", `monkeytype duel listening on ${host}:${port}`),
 );
 
 function shutdown(signal: string): void {
-  console.log(
-    JSON.stringify({ level: "info", message: "shutting down", signal }),
-  );
+  logEvent("info", "backend", `shutting down (${signal})`);
   server.close();
   for (const socket of sockets.clients) {
     socket.close(1012, "Service restarting");

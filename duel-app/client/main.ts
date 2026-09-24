@@ -3,6 +3,7 @@
 import "./style.css";
 import type {
   ClientMessage,
+  LeaderboardEntry,
   PublicProfile,
   RoomSnapshot,
   ServerMessage,
@@ -33,6 +34,8 @@ const practiceSeconds = Number(import.meta.env.VITE_PRACTICE_SECONDS ?? 30);
 const view = mustElement<HTMLElement>(document, "#view");
 const toast = mustElement<HTMLElement>(document, "#toast");
 const connection = mustElement<HTMLElement>(document, "#connectionStatus");
+const afkOverlay = mustElement<HTMLElement>(document, "#afkOverlay");
+const afkCountdown = mustElement<HTMLElement>(document, "#afkCountdown");
 let socket: WebSocket;
 let snapshot: RoomSnapshot = {
   phase: "registration",
@@ -60,6 +63,8 @@ let renderer: TypingRenderer | undefined;
 let typingIdentity = "";
 let screenKey = "";
 let preferences = loadPreferences(globalThis.localStorage);
+let afkActive = false;
+let lastActivitySentAt = 0;
 applyPreferences(preferences);
 
 function setPreferences(update: Partial<Preferences>): void {
@@ -69,7 +74,7 @@ function setPreferences(update: Partial<Preferences>): void {
   renderer?.applyPreferences(preferences);
   const themeButton = document.querySelector<HTMLButtonElement>("#themeButton");
   if (themeButton) {
-    themeButton.textContent = themes[preferences.theme].label.toLowerCase();
+    themeButton.textContent = themeLabel(preferences.theme).toLowerCase();
   }
 }
 
@@ -89,6 +94,7 @@ function connect(): void {
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data)) as ServerMessage;
     if (message.type === "snapshot") {
+      const previousPhase = snapshot.phase;
       offset = message.snapshot.serverNow - Date.now();
       if (message.snapshot.race?.id !== activeRaceId) {
         activeRaceId = message.snapshot.race?.id;
@@ -97,7 +103,7 @@ function connect(): void {
       snapshot = message.snapshot;
       commandMenu.refresh();
       syncSide();
-      render();
+      renderWithLeaderboardTransition(previousPhase);
     } else if (message.type === "claimed") {
       stationToken = message.stationToken;
       mySide = message.side;
@@ -106,6 +112,8 @@ function connect(): void {
       render();
     } else if (message.type === "error") {
       showToast(message.message, true);
+    } else if (message.type === "control" && message.action === "refresh") {
+      location.reload();
     }
   });
   socket.addEventListener("close", () => {
@@ -118,6 +126,63 @@ function connect(): void {
 function send(message: ClientMessage): void {
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(message));
+  }
+}
+
+window.addEventListener("error", (event) => {
+  send({
+    type: "clientLog",
+    level: "error",
+    message: String(event.message || "Unhandled browser error").slice(0, 500),
+  });
+});
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason as unknown;
+  send({
+    type: "clientLog",
+    level: "error",
+    message: (reason instanceof Error
+      ? reason.message
+      : typeof reason === "string"
+        ? reason
+        : "Unhandled promise rejection"
+    ).slice(0, 500),
+  });
+});
+
+function reportActivity(force = false): void {
+  if (
+    mySide === undefined ||
+    stationToken === undefined ||
+    stationToken === ""
+  ) {
+    return;
+  }
+  const now = Date.now();
+  if (!force && now - lastActivitySentAt < 1_500) return;
+  lastActivitySentAt = now;
+  if (afkActive) {
+    afkActive = false;
+    afkOverlay.hidden = true;
+    document.documentElement.classList.remove("afk-active");
+  }
+  send({ type: "activity" });
+}
+
+function renderWithLeaderboardTransition(
+  previousPhase: RoomSnapshot["phase"],
+): void {
+  const documentWithTransitions = document as Document & {
+    startViewTransition?: (update: () => void) => void;
+  };
+  if (
+    previousPhase !== "results" &&
+    snapshot.phase === "results" &&
+    typeof documentWithTransitions.startViewTransition === "function"
+  ) {
+    documentWithTransitions.startViewTransition(() => render());
+  } else {
+    render();
   }
 }
 function syncSide(): void {
@@ -267,7 +332,7 @@ function renderLobby(): void {
   const opponentSide: Side = mySide === "L" ? "R" : "L";
   const opponent = snapshot.stations[opponentSide];
   mountScreen("lobby");
-  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found" : "waiting for opponent"}</h2></div><div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div><div class="lobby-actions"><button class="primary ${me?.ready ? "ready" : ""}" id="readyButton">${me?.ready ? "ready ✓" : "ready up"}</button><button class="text-action" id="releaseStation">leave station</button></div></section>`;
+  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found" : "waiting for opponent"}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<div class="lobby-actions"><button class="primary ${me?.ready ? "ready" : ""}" id="readyButton">${me?.ready ? "ready ✓" : "ready up"}</button><button class="text-action" id="releaseStation">leave station</button></div>${leaderboardMarkup()}</section>`;
   mustElement<HTMLButtonElement>(view, "#readyButton").onclick = () =>
     send({ type: "ready", ready: !me?.ready });
   mustElement<HTMLButtonElement>(view, "#releaseStation").onclick = () =>
@@ -331,6 +396,9 @@ function renderTypingView(
   renderer?.updateRemote(
     identity.startsWith("practice-") ? {} : snapshot.stations,
   );
+  if (spectator && view.querySelector(".leaderboard") === null) {
+    view.insertAdjacentHTML("beforeend", leaderboardMarkup());
+  }
 }
 
 function finishCurrent(): void {
@@ -349,9 +417,10 @@ function finishCurrent(): void {
 function renderResults(): void {
   const sorted = [...snapshot.results].sort((a, b) => b.wpm - a.wpm);
   mountScreen("results");
-  view.innerHTML = `<section class="results"><p class="eyebrow">race complete</p><h2>${sorted.length ? `${escapeHtml(sorted[0].profile.displayName)} wins` : "no finishers"}</h2><div class="result-grid">${["L", "R"].map((side) => resultCard(side as Side)).join("")}</div><button class="primary" id="rematchButton">ready again</button>${leaderboardMarkup()}</section>`;
+  view.innerHTML = `<section class="results"><p class="eyebrow">race complete</p><h2>${sorted.length ? `${escapeHtml(sorted[0].profile.displayName)} wins` : "no finishers"}</h2><div class="result-grid">${["L", "R"].map((side) => resultCard(side as Side)).join("")}</div><p class="result-reset">stations reset in <strong id="resultResetCountdown">15</strong>s</p><button class="primary" id="rematchButton">ready again</button>${leaderboardMarkup()}</section>`;
   mustElement<HTMLButtonElement>(view, "#rematchButton").onclick = () =>
     send({ type: "rematch" });
+  updateResultCountdown();
 }
 
 function renderSpectator(): void {
@@ -360,7 +429,8 @@ function renderSpectator(): void {
     return;
   }
   mountScreen(`spectator-${snapshot.phase}`);
-  view.innerHTML = `<section class="spectator"><p class="eyebrow">spectator mode</p><h2>${snapshot.phase === "results" ? "latest result" : "waiting for the next duel"}</h2><div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>${snapshot.phase === "results" ? `<div class="result-grid">${resultCard("L")}${resultCard("R")}</div>` : ""}${leaderboardMarkup()}</section>`;
+  view.innerHTML = `<section class="spectator"><p class="eyebrow">spectator mode</p><h2>${snapshot.phase === "results" ? "latest result" : "waiting for the next duel"}</h2>${snapshot.stations.L || snapshot.stations.R ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}${snapshot.phase === "results" ? `<div class="result-grid">${resultCard("L")}${resultCard("R")}</div><p class="result-reset">next players in <strong id="resultResetCountdown">15</strong>s</p>` : ""}${leaderboardMarkup()}</section>`;
+  if (snapshot.phase === "results") updateResultCountdown();
 }
 
 function stationCard(side: Side): string {
@@ -380,7 +450,56 @@ function resultCard(side: Side): string {
 }
 
 function leaderboardMarkup(): string {
-  return `<section class="leaderboard"><h3>leaderboard</h3><div class="leaderboard-head"><span>#</span><span>player</span><span>wpm</span><span>acc</span></div>${snapshot.leaderboard.length ? snapshot.leaderboard.map((entry, index) => `<div class="leaderboard-row"><b>${index + 1}</b><span><img src="${escapeHtml(entry.avatarUrl)}" alt="">${escapeHtml(entry.displayName)}</span><strong>${Math.round(entry.bestWpm)}</strong><span>${entry.accuracy.toFixed(1)}%</span></div>`).join("") : `<p class="empty-board">Complete a duel to set the first score.</p>`}</section>`;
+  const entries = leaderboardEntries();
+  return `<section class="leaderboard"><h3>leaderboard</h3><div class="leaderboard-head"><span>#</span><span>player</span><span>wpm</span><span>raw</span><span>acc</span></div>${entries.length ? entries.map((entry, index) => `<div class="leaderboard-row${entry.provisional ? " provisional" : ""}" style="view-transition-name: player-${entry.githubId}"><b>${entry.provisional ? "—" : index + 1}</b><span><img src="${escapeHtml(entry.avatarUrl)}" alt="">${escapeHtml(entry.displayName)}</span><strong>${entry.provisional ? "waiting" : Math.round(entry.bestWpm)}</strong><span>${entry.provisional ? "—" : Math.round(entry.bestRaw)}</span><span>${entry.provisional ? "—" : `${entry.accuracy.toFixed(1)}%`}</span></div>`).join("") : `<p class="empty-board">Register to join the grid.</p>`}</section>`;
+}
+
+type DisplayLeaderboardEntry = LeaderboardEntry & { provisional?: boolean };
+
+function leaderboardEntries(): DisplayLeaderboardEntry[] {
+  const activeProfiles = (["L", "R"] as const)
+    .map((side) => snapshot.stations[side]?.profile)
+    .filter((profile) => profile !== undefined);
+  const showGridPositions = snapshot.phase !== "results";
+  const entries: DisplayLeaderboardEntry[] = snapshot.leaderboard
+    .filter(
+      (entry) =>
+        !showGridPositions ||
+        !activeProfiles.some((profile) => profile.githubId === entry.githubId),
+    )
+    .map((entry) => ({ ...entry }));
+  if (!showGridPositions) return entries;
+  for (const side of ["L", "R"] as const) {
+    const profile = snapshot.stations[side]?.profile;
+    if (profile !== undefined) {
+      entries.push({
+        ...profile,
+        bestWpm: 0,
+        bestRaw: 0,
+        accuracy: 100,
+        races: 0,
+        lastPlayedAt: 0,
+        provisional: true,
+      });
+    }
+  }
+  return entries;
+}
+
+function updateResultCountdown(): void {
+  const element = view.querySelector<HTMLElement>("#resultResetCountdown");
+  if (element === null || snapshot.resultsResetAt === undefined) return;
+  element.textContent = String(
+    Math.max(
+      0,
+      Math.ceil((snapshot.resultsResetAt - (Date.now() + offset)) / 1_000),
+    ),
+  );
+  frame = requestAnimationFrame(updateResultCountdown);
+}
+
+function waitingMonkey(): string {
+  return `<div class="waiting-monkey" aria-label="Animated monkey typing while waiting"><div class="monkey-head"><i></i><i></i><span></span></div><div class="monkey-hands"><b></b><b></b></div><div class="monkey-keyboard"><span></span><span></span><span></span><span></span><span></span></div><p>warming up the keys…</p></div>`;
 }
 
 function makePracticeText(): string {
@@ -407,6 +526,10 @@ function escapeHtml(value: string): string {
     '"': "&quot;",
   };
   return value.replace(/[&<>'"]/g, (char) => entities[char] ?? char);
+}
+
+function themeLabel(name: string): string {
+  return themes[name]?.label ?? themes.serika_dark?.label ?? "Serika Dark";
 }
 
 function mustElement<T extends Element>(
@@ -450,10 +573,8 @@ function commandInventory(): Command[] {
       name: "theme",
       aliases: ["serika dracula nord terminal light"],
       children: () =>
-        choiceCommands(
-          "theme",
-          Object.keys(themes) as (keyof typeof themes)[],
-          (value) => themes[value].label,
+        choiceCommands("theme", Object.keys(themes), (value) =>
+          themeLabel(value),
         ),
     },
     {
@@ -626,6 +747,12 @@ function navigate(next: "station" | "spectator"): void {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (afkActive) {
+    event.preventDefault();
+    reportActivity(true);
+    return;
+  }
+  reportActivity();
   if (
     (event.ctrlKey || event.metaKey) &&
     event.shiftKey &&
@@ -692,6 +819,32 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("pointerdown", () => reportActivity(true), {
+  capture: true,
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") reportActivity(true);
+});
+
+function updateAfkOverlay(): void {
+  const station = mySide ? snapshot.stations[mySide] : undefined;
+  const now = Date.now() + offset;
+  const active =
+    station?.afkWarningAt !== undefined &&
+    station.afkResetAt !== undefined &&
+    now >= station.afkWarningAt;
+  afkActive = active;
+  afkOverlay.hidden = !active;
+  document.documentElement.classList.toggle("afk-active", active);
+  if (active && station.afkResetAt !== undefined) {
+    afkCountdown.textContent = String(
+      Math.max(0, Math.ceil((station.afkResetAt - now) / 1_000)),
+    );
+  }
+}
+
+window.setInterval(updateAfkOverlay, 250);
+
 window.addEventListener("paste", (event) => {
   if (renderer && document.activeElement === view.querySelector(".test")) {
     event.preventDefault();
@@ -715,7 +868,7 @@ mustElement<HTMLButtonElement>(document, "#homeButton").onclick = () => {
 mustElement<HTMLButtonElement>(document, "#themeButton").onclick = () =>
   commandMenu.open();
 mustElement<HTMLButtonElement>(document, "#themeButton").textContent =
-  themes[preferences.theme].label.toLowerCase();
+  themeLabel(preferences.theme).toLowerCase();
 window.addEventListener("hashchange", () => {
   const requested = location.hash === "#/spectate" ? "spectator" : "station";
   if (requested === route) {

@@ -11,6 +11,7 @@ import type {
   StationState,
 } from "../shared/protocol.js";
 import type { DuelDatabase } from "./database.js";
+import { logEvent } from "./logger.js";
 
 type Client = {
   socket: WebSocket;
@@ -22,7 +23,13 @@ type Station = {
   token: string;
   socket?: WebSocket;
   lastSequence: number;
+  lastActivityAt: number;
+  afkWarned: boolean;
 } & StationState;
+
+const AFK_WARNING_MS = 10_000;
+const AFK_RESET_MS = 20_000;
+const RESULTS_RESET_MS = 15_000;
 
 export class DuelRoom {
   private readonly clients = new Set<Client>();
@@ -31,12 +38,18 @@ export class DuelRoom {
   private results: RaceResult[] = [];
   private phase: RoomSnapshot["phase"] = "registration";
   private raceTimer?: NodeJS.Timeout;
+  private resultsTimer?: NodeJS.Timeout;
+  private resultsResetAt?: number;
+  private readonly housekeepingTimer: NodeJS.Timeout;
 
   constructor(
     private readonly database: DuelDatabase,
     private readonly words: string[],
     private readonly durationSeconds = 30,
-  ) {}
+  ) {
+    this.housekeepingTimer = setInterval(() => this.checkAfk(), 500);
+    this.housekeepingTimer.unref();
+  }
 
   addClient(socket: WebSocket): Client {
     const client: Client = { socket, role: "spectator" };
@@ -52,12 +65,18 @@ export class DuelRoom {
     if (station && station.token === client.token) {
       station.connected = false;
       station.socket = undefined;
+      logEvent("warn", client.side, "station disconnected");
       this.broadcast();
     }
   }
 
-  attach(client: Client, token?: string): void {
-    client.role = "station";
+  attach(client: Client, role: "station" | "spectator", token?: string): void {
+    client.role = role;
+    if (role === "spectator") {
+      logEvent("info", "leaderboard", "spectator display connected");
+      this.send(client, { type: "snapshot", snapshot: this.snapshot() });
+      return;
+    }
     if (token === undefined || token === "") {
       this.send(client, { type: "snapshot", snapshot: this.snapshot() });
       return;
@@ -77,6 +96,8 @@ export class DuelRoom {
     client.token = token;
     station.connected = true;
     station.socket = client.socket;
+    this.touch(station);
+    logEvent("info", side, "station session reattached");
     this.broadcast();
   }
 
@@ -113,12 +134,15 @@ export class DuelRoom {
       token,
       socket: client.socket,
       lastSequence: -1,
+      lastActivityAt: Date.now(),
+      afkWarned: false,
     };
     this.stations.set(side, station);
     client.role = "station";
     client.side = side;
     client.token = token;
     this.database.saveProfile(profile);
+    logEvent("info", side, `registered @${profile.login}`);
     this.send(client, { type: "claimed", side, stationToken: token, profile });
     this.phase = "registration";
     this.broadcast();
@@ -126,7 +150,11 @@ export class DuelRoom {
 
   handle(client: Client, message: ClientMessage): void {
     if (message.type === "hello") {
-      this.attach(client, message.stationToken);
+      this.attach(client, message.role, message.stationToken);
+      return;
+    }
+    if (message.type === "clientLog") {
+      logEvent(message.level, client.side ?? "leaderboard", message.message);
       return;
     }
     const station = client.side ? this.stations.get(client.side) : undefined;
@@ -137,6 +165,11 @@ export class DuelRoom {
       });
       return;
     }
+    if (message.type === "activity") {
+      this.touch(station);
+      return;
+    }
+    this.touch(station);
     switch (message.type) {
       case "practiceComplete":
         station.practiceCount = Math.min(2, station.practiceCount + 1);
@@ -194,13 +227,68 @@ export class DuelRoom {
     if (!client.side || this.phase === "racing" || this.phase === "countdown") {
       return;
     }
-    this.stations.delete(client.side);
+    const side = client.side;
+    this.stations.delete(side);
     client.side = undefined;
     client.token = undefined;
     this.phase = this.stations.size ? "registration" : "registration";
     this.results = [];
     this.race = undefined;
+    this.clearRaceTimers();
+    logEvent("info", side, "station released");
     this.broadcast();
+  }
+
+  forceReset(target: Side | "all" = "all", reason = "operator reset"): void {
+    if (
+      target === "all" ||
+      this.phase === "countdown" ||
+      this.phase === "racing"
+    ) {
+      this.resetRoom(reason);
+      return;
+    }
+    this.stations.delete(target);
+    for (const client of this.clients) {
+      if (client.side === target) {
+        client.side = undefined;
+        client.token = undefined;
+      }
+    }
+    this.phase = "registration";
+    this.results = [];
+    this.race = undefined;
+    this.clearRaceTimers();
+    logEvent("warn", target, `station reset: ${reason}`);
+    this.broadcast();
+  }
+
+  forceRefresh(target: Side | "leaderboard" | "all"): void {
+    for (const client of this.clients) {
+      const matches =
+        target === "all" ||
+        (target === "leaderboard" && client.role === "spectator") ||
+        client.side === target;
+      if (matches) this.send(client, { type: "control", action: "refresh" });
+    }
+    logEvent("warn", "backend", `operator refresh sent to ${target}`);
+  }
+
+  clientStatus(): { source: Side | "leaderboard"; connected: boolean }[] {
+    const status: { source: Side | "leaderboard"; connected: boolean }[] = [];
+    for (const side of ["L", "R"] as const) {
+      status.push({
+        source: side,
+        connected: this.stations.get(side)?.connected ?? false,
+      });
+    }
+    status.push({
+      source: "leaderboard",
+      connected: [...this.clients].some(
+        (client) => client.role === "spectator",
+      ),
+    });
+    return status;
   }
 
   snapshot(): RoomSnapshot {
@@ -215,6 +303,12 @@ export class DuelRoom {
         cursorIndex: station.cursorIndex,
         wpm: station.wpm,
         accuracy: station.accuracy,
+        ...(this.isAfkEligible()
+          ? {
+              afkWarningAt: station.lastActivityAt + AFK_WARNING_MS,
+              afkResetAt: station.lastActivityAt + AFK_RESET_MS,
+            }
+          : {}),
       };
     }
     return {
@@ -224,6 +318,7 @@ export class DuelRoom {
       results: this.results,
       leaderboard: this.database.leaderboard(),
       serverNow: Date.now(),
+      resultsResetAt: this.resultsResetAt,
     };
   }
 
@@ -248,6 +343,9 @@ export class DuelRoom {
       durationSeconds: this.durationSeconds,
     };
     this.phase = "countdown";
+    this.resultsResetAt = undefined;
+    clearTimeout(this.resultsTimer);
+    logEvent("info", "backend", `race ${this.race.id} countdown started`);
     this.broadcast();
     setTimeout(() => {
       if (this.phase === "countdown") {
@@ -285,6 +383,11 @@ export class DuelRoom {
       finishedAt: Date.now(),
     };
     this.results.push(result);
+    logEvent(
+      "info",
+      station.side,
+      `finished at ${result.wpm.toFixed(1)} adjusted WPM (${result.raw.toFixed(1)} raw)`,
+    );
     this.broadcast();
     if (this.results.length === 2) this.finalize();
   }
@@ -295,12 +398,74 @@ export class DuelRoom {
     }
     clearTimeout(this.raceTimer);
     this.phase = "results";
+    this.resultsResetAt = Date.now() + RESULTS_RESET_MS;
     this.database.saveRace(
       this.race.id,
       this.race.startAt,
       this.race.durationSeconds,
       this.results,
     );
+    this.broadcast();
+    logEvent(
+      "info",
+      "backend",
+      `race ${this.race.id} finalized; reset in 15 seconds`,
+    );
+    clearTimeout(this.resultsTimer);
+    this.resultsTimer = setTimeout(
+      () => this.resetRoom("post-race timeout"),
+      RESULTS_RESET_MS,
+    );
+  }
+
+  private isAfkEligible(): boolean {
+    return this.phase === "registration" || this.phase === "lobby";
+  }
+
+  private touch(station: Station): void {
+    const wasWarned = station.afkWarned;
+    station.lastActivityAt = Date.now();
+    station.afkWarned = false;
+    if (wasWarned && this.isAfkEligible()) this.broadcast();
+  }
+
+  private checkAfk(): void {
+    if (!this.isAfkEligible()) return;
+    const now = Date.now();
+    for (const [side, station] of this.stations) {
+      if (now >= station.lastActivityAt + AFK_RESET_MS) {
+        logEvent("warn", side, "station reset after 20 seconds of inactivity");
+        this.forceReset(side, "AFK timeout");
+        continue;
+      }
+      if (
+        !station.afkWarned &&
+        now >= station.lastActivityAt + AFK_WARNING_MS
+      ) {
+        station.afkWarned = true;
+        logEvent("warn", side, "AFK warning displayed");
+        this.broadcast();
+      }
+    }
+  }
+
+  private clearRaceTimers(): void {
+    clearTimeout(this.raceTimer);
+    clearTimeout(this.resultsTimer);
+    this.resultsResetAt = undefined;
+  }
+
+  private resetRoom(reason: string): void {
+    this.clearRaceTimers();
+    this.stations.clear();
+    this.results = [];
+    this.race = undefined;
+    this.phase = "registration";
+    for (const client of this.clients) {
+      client.side = undefined;
+      client.token = undefined;
+    }
+    logEvent("warn", "backend", `room reset: ${reason}`);
     this.broadcast();
   }
 

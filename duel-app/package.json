@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,server -c yellow,cyan \"vite --host 0.0.0.0\" \"tsx watch server/index.ts\"",
+    "generate:themes": "node scripts/generate-themes.mjs",
     "build": "vite build && tsc -p tsconfig.server.json && cp -R server/data dist-server/server/",
     "build:web": "vite build",
     "start": "node dist-server/server/index.js",

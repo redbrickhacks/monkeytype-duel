@@ -22,6 +22,8 @@ export type StationState = {
   cursorIndex: number;
   wpm: number;
   accuracy: number;
+  afkWarningAt?: number;
+  afkResetAt?: number;
 };
 
 export type RaceDefinition = {
@@ -45,6 +47,7 @@ export type RaceResult = {
 
 export type LeaderboardEntry = {
   bestWpm: number;
+  bestRaw: number;
   accuracy: number;
   races: number;
   lastPlayedAt: number;
@@ -57,6 +60,7 @@ export type RoomSnapshot = {
   results: RaceResult[];
   leaderboard: LeaderboardEntry[];
   serverNow: number;
+  resultsResetAt?: number;
 };
 
 export type ClientMessage =
@@ -76,7 +80,9 @@ export type ClientMessage =
       result: Omit<RaceResult, "side" | "profile" | "finishedAt">;
     }
   | { type: "release" }
-  | { type: "rematch" };
+  | { type: "rematch" }
+  | { type: "activity" }
+  | { type: "clientLog"; level: "warn" | "error"; message: string };
 
 export type ServerMessage =
   | { type: "snapshot"; snapshot: RoomSnapshot }
@@ -87,4 +93,21 @@ export type ServerMessage =
       profile: PublicProfile;
     }
   | { type: "error"; message: string }
+  | { type: "control"; action: "refresh" }
   | { type: "pong"; serverNow: number };
+
+export type AdminTarget = Side | "leaderboard" | "all";
+
+export type AdminLogEntry = {
+  id: number;
+  at: number;
+  level: "info" | "warn" | "error";
+  source: "backend" | Side | "leaderboard";
+  message: string;
+};
+
+export type AdminStatus = {
+  snapshot: RoomSnapshot;
+  clients: { source: Side | "leaderboard"; connected: boolean }[];
+  logs: AdminLogEntry[];
+};

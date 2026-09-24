@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#323437" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>duel control</title>
+  </head>
+  <body>
+    <main class="admin-shell">
+      <header>
+        <div>
+          <small>monkeytype duel</small>
+          <h1>race control</h1>
+        </div>
+        <span id="adminConnection">offline</span>
+      </header>
+      <form id="tokenForm" class="token-card">
+        <label for="adminToken">operator token</label>
+        <input
+          id="adminToken"
+          type="password"
+          autocomplete="current-password"
+          required
+        />
+        <button>connect</button>
+      </form>
+      <div id="dashboard" hidden>
+        <section id="roomSummary" class="room-summary"></section>
+        <section class="control-grid" id="controlGrid"></section>
+        <section class="log-panel">
+          <div class="panel-title">
+            <h2>event log</h2>
+            <button id="clearLogs">clear view</button>
+          </div>
+          <div id="logs" aria-live="polite"></div>
+        </section>
+      </div>
+      <p id="adminError" role="alert"></p>
+    </main>
+    <script type="module" src="/admin.ts"></script>
+  </body>
+</html>

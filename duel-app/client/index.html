@@ -64,6 +64,17 @@
       </footer>
       <div id="toast" role="status"></div>
     </div>
+    <div id="afkOverlay" class="afk-overlay" hidden role="alert">
+      <div>
+        <p>afk detected</p>
+        <strong>
+          station resets in
+          <span id="afkCountdown">10</span>
+          s
+        </strong>
+        <small>press any key or tap anywhere to stay</small>
+      </div>
+    </div>
     <script type="module" src="/main.ts"></script>
   </body>
 </html>

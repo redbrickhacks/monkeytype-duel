@@ -1,0 +1,188 @@
+@font-face {
+  font-family: "Roboto Mono";
+  src: url("/fonts/RobotoMono-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+:root {
+  font-family: "Roboto Mono", monospace;
+  color: #d1d0c5;
+  background: #202225;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  border: 0;
+  cursor: pointer;
+  border-radius: 0.35rem;
+  background: #e2b714;
+  color: #202225;
+  padding: 0.65rem 0.9rem;
+}
+.admin-shell {
+  width: min(100% - 2rem, 1200px);
+  margin: auto;
+  padding: 2rem 0;
+}
+header,
+.panel-title,
+.control-heading,
+.control-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+header {
+  margin-bottom: 2rem;
+}
+h1,
+h2 {
+  margin: 0;
+  font-weight: 400;
+}
+header small,
+article small {
+  color: #646669;
+}
+#adminConnection::before,
+.control-heading span::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.45rem;
+  border-radius: 50%;
+  background: #ca4754;
+}
+#adminConnection.live::before,
+.control-heading span.online::before {
+  background: #7eaa52;
+}
+.token-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  width: min(100%, 38rem);
+  padding: 1.25rem;
+  background: #2c2e31;
+  border-radius: 0.5rem;
+}
+.token-card label {
+  grid-column: 1/-1;
+  color: #646669;
+}
+.token-card input {
+  min-width: 0;
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0.8rem;
+  background: #323437;
+  color: #d1d0c5;
+}
+.room-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.room-summary div,
+.control-grid article,
+.log-panel {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background: #2c2e31;
+}
+.room-summary small,
+.room-summary strong,
+article > strong,
+article > small {
+  display: block;
+}
+.room-summary strong {
+  margin-top: 0.45rem;
+  color: #e2b714;
+}
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+.control-heading {
+  color: #e2b714;
+  margin-bottom: 1rem;
+}
+.control-heading span {
+  color: #646669;
+  font-size: 0.7rem;
+}
+.control-actions {
+  justify-content: flex-start;
+  margin-top: 1.2rem;
+}
+.control-actions button {
+  background: #646669;
+  color: #d1d0c5;
+}
+.control-actions .danger {
+  background: #ca4754;
+  color: white;
+}
+.all-control {
+  grid-column: 1/-1;
+}
+.log-panel {
+  margin-top: 1rem;
+}
+.panel-title button {
+  background: transparent;
+  color: #646669;
+}
+#logs {
+  margin-top: 1rem;
+  max-height: 28rem;
+  overflow: auto;
+}
+.log {
+  display: grid;
+  grid-template-columns: 6rem 6rem 1fr;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid #323437;
+  font-size: 0.78rem;
+}
+.log time,
+.log b {
+  color: #646669;
+}
+.log.warn span {
+  color: #e2b714;
+}
+.log.error span,
+#adminError {
+  color: #ca4754;
+}
+@media (max-width: 760px) {
+  .control-grid,
+  .room-summary {
+    grid-template-columns: 1fr;
+  }
+  .all-control {
+    grid-column: auto;
+  }
+  .log {
+    grid-template-columns: 5rem 4rem 1fr;
+  }
+}

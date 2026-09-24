@@ -28,6 +28,16 @@ export function parseClientMessage(value: unknown): ClientMessage {
     case "practiceComplete":
     case "release":
     case "rematch":
+    case "activity":
+      return value as ClientMessage;
+    case "clientLog":
+      if (
+        (value.level !== "warn" && value.level !== "error") ||
+        typeof value.message !== "string" ||
+        value.message.length > 500
+      ) {
+        throw new Error("Invalid client log message.");
+      }
       return value as ClientMessage;
     case "ready":
       if (typeof value.ready !== "boolean") {

@@ -15,6 +15,16 @@ describe("parseClientMessage", () => {
         accuracy: 98,
       }),
     ).toMatchObject({ type: "progress", cursorIndex: 5 });
+    expect(parseClientMessage({ type: "activity" })).toEqual({
+      type: "activity",
+    });
+    expect(
+      parseClientMessage({
+        type: "clientLog",
+        level: "error",
+        message: "render failed",
+      }),
+    ).toMatchObject({ type: "clientLog", level: "error" });
   });
 
   it("rejects invalid sides and non-finite race values", () => {

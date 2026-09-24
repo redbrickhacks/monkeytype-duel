@@ -1,70 +1,31 @@
+import { monkeytypeThemes } from "./themes.generated";
+
 export const PREFERENCES_KEY = "monkeytypeDuelPreferences";
 export const PREFERENCES_VERSION = 1;
 
-export const themes = {
-  serika_dark: {
-    label: "Serika Dark",
-    bg: "#323437",
-    main: "#e2b714",
-    caret: "#e2b714",
-    sub: "#646669",
-    subAlt: "#2c2e31",
-    text: "#d1d0c5",
-    error: "#ca4754",
-    errorExtra: "#7e2a33",
-    scheme: "dark",
-  },
-  serika: {
-    label: "Serika",
-    bg: "#e1e1e3",
-    main: "#e2b714",
-    caret: "#e2b714",
-    sub: "#aaaeb3",
-    subAlt: "#d1d3d8",
-    text: "#323437",
-    error: "#da3333",
-    errorExtra: "#791717",
-    scheme: "light",
-  },
-  dracula: {
-    label: "Dracula",
-    bg: "#282a36",
-    main: "#bd93f9",
-    caret: "#bd93f9",
-    sub: "#6272a4",
-    subAlt: "#20222c",
-    text: "#f8f8f2",
-    error: "#ff5555",
-    errorExtra: "#f1fa8c",
-    scheme: "dark",
-  },
-  nord: {
-    label: "Nord",
-    bg: "#242933",
-    main: "#88c0d0",
-    caret: "#eceff4",
-    sub: "#929aaa",
-    subAlt: "#2e3440",
-    text: "#d8dee9",
-    error: "#bf616a",
-    errorExtra: "#793e44",
-    scheme: "dark",
-  },
-  terminal: {
-    label: "Terminal",
-    bg: "#191a1b",
-    main: "#79a617",
-    caret: "#79a617",
-    sub: "#48494b",
-    subAlt: "#141516",
-    text: "#e7eae0",
-    error: "#a61717",
-    errorExtra: "#731010",
-    scheme: "dark",
-  },
-} as const;
+type ThemeDefinition = {
+  label: string;
+  bg: string;
+  main: string;
+  caret: string;
+  sub: string;
+  subAlt: string;
+  text: string;
+  error: string;
+  errorExtra: string;
+  scheme: "dark" | "light";
+};
 
-export type ThemeName = keyof typeof themes;
+export const themes: Record<string, ThemeDefinition> = Object.fromEntries(
+  Object.entries(monkeytypeThemes)
+    .map(([name, theme]): [string, ThemeDefinition] => [
+      name,
+      { ...theme, scheme: isLight(theme.bg) ? "light" : "dark" },
+    ])
+    .sort(([left], [right]) => left.localeCompare(right)),
+);
+
+export type ThemeName = string;
 export type FontSize = 1 | 1.25 | 1.5 | 2;
 export type CaretStyle = "line" | "block" | "outline" | "underline";
 export type SmoothCaret = "off" | "fast" | "medium" | "slow";
@@ -115,9 +76,10 @@ export function validatePreferences(value: unknown): Preferences {
 
   return {
     version: PREFERENCES_VERSION,
-    theme: isMember(Object.keys(themes) as ThemeName[], value.theme)
-      ? value.theme
-      : defaultPreferences.theme,
+    theme:
+      typeof value.theme === "string" && Object.hasOwn(themes, value.theme)
+        ? value.theme
+        : defaultPreferences.theme,
     fontSize: isMember(fontSizes, value.fontSize)
       ? value.fontSize
       : defaultPreferences.fontSize,
@@ -179,7 +141,8 @@ export function savePreferences(
 
 export function applyPreferences(preferences: Preferences): void {
   const root = document.documentElement;
-  const theme = themes[preferences.theme];
+  const theme = themes[preferences.theme] ?? themes.serika_dark;
+  if (theme === undefined) return;
   root.dataset.theme = preferences.theme;
   root.dataset.motion = preferences.motion;
   root.style.setProperty("--bg", theme.bg);
@@ -198,6 +161,19 @@ export function applyPreferences(preferences: Preferences): void {
     'meta[name="theme-color"]',
   );
   meta?.setAttribute("content", theme.bg);
+}
+
+function isLight(color: string): boolean {
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(color);
+  if (!match) return false;
+  const [, red = "00", green = "00", blue = "00"] = match;
+  return (
+    (Number.parseInt(red, 16) * 299 +
+      Number.parseInt(green, 16) * 587 +
+      Number.parseInt(blue, 16) * 114) /
+      1000 >
+    160
+  );
 }
 
 export function caretDuration(preferences: Preferences): number {

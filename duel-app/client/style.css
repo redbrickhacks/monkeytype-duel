@@ -350,6 +350,112 @@ label {
   flex-direction: column;
   align-items: center;
 }
+.waiting-monkey {
+  position: relative;
+  width: 15rem;
+  height: 12rem;
+  margin: 2rem auto;
+  color: var(--sub);
+}
+.monkey-head {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 7rem;
+  height: 6.5rem;
+  transform: translateX(-50%);
+  border: 0.7rem solid var(--main);
+  border-radius: 48% 48% 44% 44%;
+  background: var(--sub-alt);
+}
+.monkey-head::before,
+.monkey-head::after {
+  content: "";
+  position: absolute;
+  top: -0.75rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  background: var(--main);
+  z-index: -1;
+}
+.monkey-head::before {
+  left: -1.4rem;
+}
+.monkey-head::after {
+  right: -1.4rem;
+}
+.monkey-head i {
+  position: absolute;
+  top: 2rem;
+  width: 0.65rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: var(--text);
+}
+.monkey-head i:first-child {
+  left: 1.35rem;
+}
+.monkey-head i:nth-child(2) {
+  right: 1.35rem;
+}
+.monkey-head span {
+  position: absolute;
+  left: 50%;
+  bottom: 0.8rem;
+  width: 2.8rem;
+  height: 1.4rem;
+  transform: translateX(-50%);
+  border: 0.25rem solid var(--sub);
+  border-top: 0;
+  border-radius: 0 0 50% 50%;
+}
+.monkey-hands b {
+  position: absolute;
+  top: 6.6rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--main);
+  animation: bongo-type 0.42s ease-in-out infinite alternate;
+  z-index: 2;
+}
+.monkey-hands b:first-child {
+  left: 3rem;
+}
+.monkey-hands b:last-child {
+  right: 3rem;
+  animation-delay: -0.42s;
+}
+.monkey-keyboard {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  top: 8rem;
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.7rem;
+  border-radius: 0.45rem;
+  background: var(--sub-alt);
+  transform: perspective(8rem) rotateX(35deg);
+}
+.monkey-keyboard span {
+  flex: 1;
+  height: 0.6rem;
+  border-radius: 0.15rem;
+  background: var(--sub);
+}
+.waiting-monkey p {
+  position: absolute;
+  inset: auto 0 0;
+  margin: 0;
+  font-size: 0.75rem;
+}
+@keyframes bongo-type {
+  to {
+    transform: translateY(1.15rem) rotate(8deg);
+  }
+}
 .countdown {
   text-align: center;
 }
@@ -731,10 +837,66 @@ dd {
 .leaderboard-head,
 .leaderboard-row {
   display: grid;
-  grid-template-columns: 2rem 1fr 5rem 5rem;
+  grid-template-columns: 2rem 1fr 5rem 5rem 5rem;
   gap: 1rem;
   align-items: center;
   padding: 0.8rem 1rem;
+}
+.leaderboard-row {
+  contain: layout;
+}
+.leaderboard-row.provisional {
+  color: var(--sub);
+  border: 1px dashed var(--sub);
+}
+.leaderboard-row.provisional strong {
+  color: var(--sub);
+  font-size: 0.75rem;
+}
+.result-reset {
+  color: var(--sub);
+  font-size: 0.8rem;
+}
+.result-reset strong {
+  color: var(--main);
+}
+::view-transition-group(*) {
+  animation-duration: 750ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.afk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 68%, transparent);
+  text-align: center;
+}
+.afk-overlay[hidden] {
+  display: none;
+}
+.afk-overlay > div {
+  padding: 2rem 2.5rem;
+  border-radius: var(--radius);
+  background: var(--sub-alt);
+  box-shadow: 0 1rem 4rem #0008;
+}
+.afk-overlay p {
+  margin: 0 0 0.7rem;
+  color: var(--error);
+}
+.afk-overlay strong,
+.afk-overlay small {
+  display: block;
+}
+.afk-overlay small {
+  margin-top: 0.8rem;
+  color: var(--sub);
+}
+.afk-active #app {
+  filter: blur(8px);
+  pointer-events: none;
 }
 .leaderboard-head {
   color: var(--sub);
@@ -845,8 +1007,9 @@ footer span {
   }
   .leaderboard-head,
   .leaderboard-row {
-    grid-template-columns: 1.5rem 1fr 3.5rem 4rem;
+    grid-template-columns: 1.5rem minmax(7rem, 1fr) 3rem 3rem 3.5rem;
     padding: 0.7rem 0.4rem;
+    gap: 0.35rem;
   }
   .profile-card {
     grid-template-columns: auto 1fr;
@@ -859,5 +1022,11 @@ footer span {
   }
   footer {
     display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .monkey-hands b,
+  ::view-transition-group(*) {
+    animation: none;
   }
 }
