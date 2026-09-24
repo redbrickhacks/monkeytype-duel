@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import http from "node:http";
 import express from "express";
 import { WebSocketServer } from "ws";
-import type { ClientMessage } from "../shared/protocol.js";
 import { DuelDatabase } from "./database.js";
 import { ProfileError, resolveGithubProfile } from "./github.js";
 import { DuelRoom } from "./room.js";
+import { parseClientMessage } from "./validation.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT ?? 3000);
@@ -109,7 +109,7 @@ sockets.on("connection", (socket, request) => {
         : buffer instanceof ArrayBuffer
           ? Buffer.from(buffer).toString("utf8")
           : buffer.toString("utf8");
-      const message = JSON.parse(payload) as ClientMessage;
+      const message = parseClientMessage(JSON.parse(payload) as unknown);
       if (message.type === "claim") {
         room.claim(
           client,
