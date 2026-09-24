@@ -21,6 +21,10 @@ VITE_API_URL=https://api.keeb.makerspace.tools pnpm --dir duel-app build
 
 The Pages artifact is `duel-app/dist-web`. The server entry point is `duel-app/dist-server/server/index.js`.
 
+Production service templates live in `deploy/`. They run the Node process as the
+unprivileged `monkeytype-duel` user, bind it to loopback, and expose only Caddy
+on ports 80/443. Caddy obtains and renews the TLS certificate automatically.
+
 Runtime state is stored in one SQLite file configured by `DATABASE_PATH`. The server is deliberately single-instance; restarting during a race aborts that in-memory race while preserving completed results.
 
 Monkeytype and this derivative are licensed under GPL-3.0.
