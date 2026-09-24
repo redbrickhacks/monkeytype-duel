@@ -34,7 +34,7 @@ jobs:
           node-version: 24.11.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile --filter @monkeytype/duel-app
-      - run: pnpm --dir duel-app build
+      - run: pnpm --dir duel-app build:web
         env:
           VITE_API_URL: https://api.keeb.makerspace.tools
       - uses: actions/upload-pages-artifact@v3

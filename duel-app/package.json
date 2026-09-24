@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "concurrently -k -n web,server -c yellow,cyan \"vite --host 0.0.0.0\" \"tsx watch server/index.ts\"",
     "build": "vite build && tsc -p tsconfig.server.json && cp -R server/data dist-server/server/",
+    "build:web": "vite build",
     "start": "node dist-server/server/index.js",
     "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
