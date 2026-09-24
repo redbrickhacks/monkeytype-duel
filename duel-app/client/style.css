@@ -58,7 +58,7 @@ input:focus-visible {
   outline-offset: 3px;
 }
 #app {
-  width: min(100% - 3rem, 1200px);
+  width: min(100% - 3rem, 1050px);
   min-height: 100vh;
   margin: auto;
   display: grid;
@@ -123,6 +123,11 @@ nav {
 .icon-button {
   font-size: 1.35rem;
   padding: 0.6rem;
+}
+.icon-button svg {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
 }
 .icon-button:hover,
 #themeButton:hover,
@@ -371,15 +376,31 @@ label {
   color: var(--main);
   font-size: 1.5rem;
 }
-.words {
+.words,
+.words-viewport {
   position: relative;
-  height: 8.4rem;
+  height: calc(var(--typing-size, 1.5rem) * 5.6 + 1rem);
   overflow: hidden;
-  font-size: 1.65rem;
-  line-height: 2.8rem;
+  font-size: var(--typing-size, 1.5rem);
+  line-height: calc(var(--typing-size, 1.5rem) * 1.86);
   letter-spacing: 0.01em;
   color: var(--sub);
   user-select: none;
+}
+.words-track {
+  position: relative;
+  padding-top: 1rem;
+  transition: transform 100ms ease;
+}
+.words-track .word {
+  display: inline-block;
+  white-space: nowrap;
+}
+.words-track .word.above-scroll {
+  visibility: hidden;
+}
+.test:not(.smooth-scroll) .words-track {
+  transition: none;
 }
 .letter {
   position: relative;
@@ -421,10 +442,221 @@ label {
   border-color: #b98aea;
   color: #b98aea;
 }
+.typing-caret {
+  --caret-x: 0px;
+  --caret-y: 0px;
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: calc(var(--typing-size, 1.5rem) * 1.2);
+  border-radius: 99px;
+  background: var(--caret);
+  transform: translate(var(--caret-x), calc(var(--caret-y) + 0.25em));
+  transition: transform var(--caret-duration, 100ms) ease;
+  pointer-events: none;
+  z-index: 5;
+}
+.typing-caret.snap {
+  transition: none;
+}
+.typing-caret.local-caret {
+  animation: blink 1s step-end infinite;
+}
+.test.is-typing .local-caret {
+  animation: none;
+}
+.test[data-caret-style="block"] .local-caret {
+  width: var(--letter-width);
+  opacity: 0.35;
+}
+.test[data-caret-style="outline"] .local-caret {
+  width: var(--letter-width);
+  background: transparent;
+  border: 2px solid var(--caret);
+}
+.test[data-caret-style="underline"] .local-caret {
+  width: var(--letter-width);
+  height: 2px;
+  transform: translate(
+    var(--caret-x),
+    calc(var(--caret-y) + var(--typing-size) * 1.35)
+  );
+}
+.typing-caret.ghost-caret {
+  width: 2px;
+  padding: 0;
+  border: 0;
+  background: #5aa9e6;
+  color: #5aa9e6;
+}
+.typing-caret.ghost-caret.side-R {
+  background: #b98aea;
+}
+.caret-label {
+  position: absolute;
+  bottom: calc(100% + 0.15rem);
+  left: 0.2rem;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.55rem;
+  line-height: 1;
+}
+.focus-warning {
+  display: none;
+  position: absolute;
+  inset: 0;
+  place-items: center;
+  color: var(--text);
+  font-size: 0.8rem;
+  z-index: 10;
+}
+.focus-blur .test.unfocused .words-track {
+  filter: blur(4px);
+  opacity: 0.45;
+}
+.test.unfocused .focus-warning {
+  display: grid;
+}
+.test:focus {
+  outline: none;
+}
+.hide-live-info .live-stats {
+  display: none;
+}
+.practice-test .live-stats {
+  display: none;
+}
 @keyframes blink {
   50% {
     opacity: 0.2;
   }
+}
+
+#commandMenu {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #0009;
+  padding: 6rem 1rem 1rem;
+  align-items: flex-start;
+  justify-content: center;
+}
+#commandMenu.open {
+  display: flex;
+}
+.command-panel {
+  width: min(100%, 600px);
+  max-height: min(70vh, 560px);
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 0.5rem 2rem #0005;
+}
+.command-search-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.9rem 1rem;
+  color: var(--main);
+  border-bottom: 1px solid color-mix(in srgb, var(--sub) 25%, transparent);
+}
+.command-search {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 1rem;
+}
+input.command-search:focus-visible {
+  outline: none;
+}
+.command-search-row svg {
+  width: 1rem;
+  height: 1rem;
+}
+kbd,
+footer > span {
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  background: var(--sub-alt);
+  color: var(--sub);
+  font: inherit;
+  font-size: 0.68rem;
+}
+.command-breadcrumb {
+  padding: 0.55rem 1rem;
+  color: var(--sub);
+  font-size: 0.7rem;
+}
+.command-breadcrumb[role="button"] {
+  cursor: pointer;
+}
+.command-options {
+  max-height: calc(min(70vh, 560px) - 6rem);
+  overflow: auto;
+  padding: 0.35rem;
+}
+.command-option {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.75rem;
+  line-height: 0.75rem;
+}
+.command-option small {
+  color: var(--sub);
+}
+.command-option.active {
+  background: var(--text);
+  color: var(--bg);
+}
+.command-option.active small {
+  color: inherit;
+}
+.command-option:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.command-empty {
+  padding: 2rem;
+  color: var(--sub);
+  text-align: center;
+}
+
+footer {
+  color: var(--sub);
+  font-size: 0.72rem;
+}
+.quiet-mode body:has(.test.is-typing) header,
+.quiet-mode body:has(.test.is-typing) footer,
+.quiet-mode .test.is-typing .test-label {
+  opacity: 0.45;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0ms !important;
+    animation: none !important;
+  }
+}
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  transition-duration: 0ms !important;
+  animation: none !important;
 }
 .live-stats {
   display: grid;

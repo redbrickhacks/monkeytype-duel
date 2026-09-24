@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 import "./style.css";
 import type {
   ClientMessage,
@@ -6,7 +8,22 @@ import type {
   ServerMessage,
   Side,
 } from "../shared/protocol";
-import { TypingSession, type TypingStats } from "./typing";
+import { TypingSession } from "./typing";
+import { CommandMenu, type Command } from "./command-menu";
+import {
+  applyPreferences,
+  defaultPreferences,
+  loadPreferences,
+  savePreferences,
+  themes,
+  type Preferences,
+} from "./preferences";
+import { TypingRenderer } from "./typing-renderer";
+import {
+  canLeaveStation,
+  canNavigateToSpectator,
+  isActiveCompetition,
+} from "./competition";
 
 const apiUrl =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ??
@@ -37,6 +54,24 @@ let progressSequence = 0;
 let frame = 0;
 let tabArmedUntil = 0;
 let offset = 0;
+let raceOffset = 0;
+let activeRaceId: string | undefined;
+let renderer: TypingRenderer | undefined;
+let typingIdentity = "";
+let screenKey = "";
+let preferences = loadPreferences(globalThis.localStorage);
+applyPreferences(preferences);
+
+function setPreferences(update: Partial<Preferences>): void {
+  preferences = { ...preferences, ...update };
+  savePreferences(preferences, globalThis.localStorage);
+  applyPreferences(preferences);
+  renderer?.applyPreferences(preferences);
+  const themeButton = document.querySelector<HTMLButtonElement>("#themeButton");
+  if (themeButton) {
+    themeButton.textContent = themes[preferences.theme].label.toLowerCase();
+  }
+}
 
 function connect(): void {
   connection.textContent = "connecting";
@@ -55,7 +90,12 @@ function connect(): void {
     const message = JSON.parse(String(event.data)) as ServerMessage;
     if (message.type === "snapshot") {
       offset = message.snapshot.serverNow - Date.now();
+      if (message.snapshot.race?.id !== activeRaceId) {
+        activeRaceId = message.snapshot.race?.id;
+        raceOffset = offset;
+      }
       snapshot = message.snapshot;
+      commandMenu.refresh();
       syncSide();
       render();
     } else if (message.type === "claimed") {
@@ -123,7 +163,34 @@ function render(): void {
   renderLobby();
 }
 
+function mountScreen(key: string): void {
+  if (screenKey === key) return;
+  renderer?.dispose();
+  renderer = undefined;
+  screenKey = key;
+  view.replaceChildren();
+}
+
 function renderRegistration(): void {
+  if (screenKey === "registration") {
+    view
+      .querySelectorAll<HTMLButtonElement>("[data-side]")
+      .forEach((button) => {
+        const occupied =
+          snapshot.stations[button.dataset.side as Side] !== undefined;
+        button.classList.toggle("taken", occupied);
+        const small = button.querySelector("small");
+        if (small) {
+          small.textContent = occupied
+            ? "occupied"
+            : button.dataset.side === "L"
+              ? "left"
+              : "right";
+        }
+      });
+    return;
+  }
+  mountScreen("registration");
   view.innerHTML = `<section class="center-stage registration">
     <p class="eyebrow">event station</p><h2>choose your side</h2>
     <div class="side-picker"><button data-side="L" class="side ${snapshot.stations.L ? "taken" : ""}">L<small>${snapshot.stations.L ? "occupied" : "left"}</small></button><div class="versus">vs</div><button data-side="R" class="side ${snapshot.stations.R ? "taken" : ""}">R<small>${snapshot.stations.R ? "occupied" : "right"}</small></button></div>
@@ -183,6 +250,7 @@ function renderPractice(count: number): void {
     return;
   }
   typing = undefined;
+  mountScreen(`practice-start-${count}`);
   view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide}</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private 30 second warm-up. Your opponent cannot see this result.</p><button class="primary" id="startPractice">start practice</button><button class="text-action" id="releaseStation">change station</button></section>`;
   mustElement<HTMLButtonElement>(view, "#startPractice").onclick = () => {
     practiceText = makePracticeText();
@@ -198,6 +266,7 @@ function renderLobby(): void {
   const me = mySide ? snapshot.stations[mySide] : undefined;
   const opponentSide: Side = mySide === "L" ? "R" : "L";
   const opponent = snapshot.stations[opponentSide];
+  mountScreen("lobby");
   view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found" : "waiting for opponent"}</h2></div><div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div><div class="lobby-actions"><button class="primary ${me?.ready ? "ready" : ""}" id="readyButton">${me?.ready ? "ready ✓" : "ready up"}</button><button class="text-action" id="releaseStation">leave station</button></div></section>`;
   mustElement<HTMLButtonElement>(view, "#readyButton").onclick = () =>
     send({ type: "ready", ready: !me?.ready });
@@ -211,23 +280,26 @@ function renderRace(spectator: boolean): void {
     render();
     return;
   }
-  const now = Date.now() + offset;
+  const now = Date.now() + raceOffset;
   if (snapshot.phase === "countdown" || now < race.startAt) {
     const remaining = Math.max(1, Math.ceil((race.startAt - now) / 1000));
+    mountScreen(`countdown-${race.id}`);
     view.innerHTML = `<section class="countdown"><p>get ready</p><strong>${remaining}</strong></section>`;
     frame = requestAnimationFrame(() => renderRace(spectator));
     return;
   }
-  if (!spectator && (!typing || typing.text !== race.text)) {
-    typing = new TypingSession(race.text, race.startAt - offset);
+  if (!spectator && (!typing || typingIdentity !== race.id)) {
+    typing = new TypingSession(race.text, race.startAt - raceOffset);
+    typingIdentity = race.id;
     finishSent = false;
     progressSequence = 0;
   }
   renderTypingView(
     spectator ? "live duel" : `station ${mySide}`,
-    race.startAt + race.durationSeconds * 1000 - offset,
-    spectator ? undefined : race.text,
+    race.startAt + race.durationSeconds * 1000 - raceOffset,
+    race.text,
     spectator,
+    `${spectator ? "spectator" : "race"}-${race.id}`,
   );
 }
 
@@ -236,38 +308,38 @@ function renderTypingView(
   endAt: number,
   textOverride?: string,
   spectator = false,
+  identity = `practice-${practiceEndAt}`,
 ): void {
   const text = textOverride ?? typing?.text ?? practiceText;
-  const remaining = Math.max(0, (endAt - Date.now()) / 1000);
-  const stats = typing?.stats() ?? emptyStats();
-  view.innerHTML = `<section class="test"><div class="test-top"><span class="timer">${Math.ceil(remaining)}</span><span>${escapeHtml(label)}</span><span>${Math.round(stats.wpm)} wpm</span></div><div class="words" id="words">${renderLetters(text, spectator ? 0 : stats.cursorIndex, spectator)}</div><div class="live-stats">${raceStat("L")}${raceStat("R")}</div></section>`;
-  positionGhosts();
-  if (remaining <= 0 && !spectator) finishCurrent();
-  else frame = requestAnimationFrame(() => updateRaceClock(endAt, spectator));
-}
-
-function updateRaceClock(endAt: number, spectator: boolean): void {
-  const timer = view.querySelector<HTMLElement>(".timer");
-  if (timer) {
-    timer.textContent = String(
-      Math.max(0, Math.ceil((endAt - Date.now()) / 1000)),
-    );
+  if (renderer?.identity !== identity) {
+    mountScreen(identity);
+    renderer = new TypingRenderer({
+      root: view,
+      identity,
+      text,
+      label,
+      endAt,
+      spectator,
+      mySide,
+      preferences,
+      onDeadline: spectator ? () => undefined : finishCurrent,
+    });
+    if (typing && !spectator) renderer.attachSession(typing);
+    renderer.setMenuOpen(commandMenu.isOpen);
   }
-  if (Date.now() >= endAt) {
-    if (!spectator) finishCurrent();
-    else render();
-  } else {
-    frame = requestAnimationFrame(() => updateRaceClock(endAt, spectator));
-  }
+  if (typing && !spectator) renderer?.updateTyping(typing.stats());
+  renderer?.updateRemote(
+    identity.startsWith("practice-") ? {} : snapshot.stations,
+  );
 }
 
 function finishCurrent(): void {
   if (!typing || finishSent) return;
-  if (snapshot.phase === "racing") {
+  if (screenKey.startsWith("race-") && snapshot.phase === "racing") {
     finishSent = true;
     const result = typing.stats();
     if (result.correctChars > 0) send({ type: "finish", result });
-  } else {
+  } else if (screenKey.startsWith("practice-")) {
     finishSent = false;
     typing = undefined;
     send({ type: "practiceComplete" });
@@ -276,6 +348,7 @@ function finishCurrent(): void {
 
 function renderResults(): void {
   const sorted = [...snapshot.results].sort((a, b) => b.wpm - a.wpm);
+  mountScreen("results");
   view.innerHTML = `<section class="results"><p class="eyebrow">race complete</p><h2>${sorted.length ? `${escapeHtml(sorted[0].profile.displayName)} wins` : "no finishers"}</h2><div class="result-grid">${["L", "R"].map((side) => resultCard(side as Side)).join("")}</div><button class="primary" id="rematchButton">ready again</button>${leaderboardMarkup()}</section>`;
   mustElement<HTMLButtonElement>(view, "#rematchButton").onclick = () =>
     send({ type: "rematch" });
@@ -286,6 +359,7 @@ function renderSpectator(): void {
     renderRace(true);
     return;
   }
+  mountScreen(`spectator-${snapshot.phase}`);
   view.innerHTML = `<section class="spectator"><p class="eyebrow">spectator mode</p><h2>${snapshot.phase === "results" ? "latest result" : "waiting for the next duel"}</h2><div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>${snapshot.phase === "results" ? `<div class="result-grid">${resultCard("L")}${resultCard("R")}</div>` : ""}${leaderboardMarkup()}</section>`;
 }
 
@@ -309,77 +383,6 @@ function leaderboardMarkup(): string {
   return `<section class="leaderboard"><h3>leaderboard</h3><div class="leaderboard-head"><span>#</span><span>player</span><span>wpm</span><span>acc</span></div>${snapshot.leaderboard.length ? snapshot.leaderboard.map((entry, index) => `<div class="leaderboard-row"><b>${index + 1}</b><span><img src="${escapeHtml(entry.avatarUrl)}" alt="">${escapeHtml(entry.displayName)}</span><strong>${Math.round(entry.bestWpm)}</strong><span>${entry.accuracy.toFixed(1)}%</span></div>`).join("") : `<p class="empty-board">Complete a duel to set the first score.</p>`}</section>`;
 }
 
-function renderLetters(
-  text: string,
-  cursor: number,
-  spectator: boolean,
-): string {
-  const me = mySide ? snapshot.stations[mySide] : undefined;
-  const typed = spectator ? [] : (typing?.typed ?? []);
-  return (
-    Array.from(text)
-      .map((letter, index) => {
-        let state = "";
-        if (!spectator && index < typed.length) {
-          state = typed[index] === letter ? "correct" : "incorrect";
-        }
-        const caret = !spectator && index === cursor ? " own-caret" : "";
-        return `<span class="letter ${state}${caret}" data-index="${index}">${letter === " " ? "&nbsp;" : escapeHtml(letter)}</span>`;
-      })
-      .join("") +
-    (!spectator && cursor >= text.length
-      ? `<span class="letter own-caret">&nbsp;</span>`
-      : "") +
-    (me ? "" : "")
-  );
-}
-
-function positionGhosts(): void {
-  const container = view.querySelector<HTMLElement>("#words");
-  if (!container) return;
-  if (route === "station" && typing) {
-    const active = container.querySelector<HTMLElement>(
-      `[data-index="${typing.typed.length}"]`,
-    );
-    if (active) {
-      container.scrollTop = Math.max(
-        0,
-        active.offsetTop - active.offsetHeight * 1.2,
-      );
-    }
-  }
-  for (const side of ["L", "R"] as Side[]) {
-    if (side === mySide && route === "station") continue;
-    const station = snapshot.stations[side];
-    if (!station) continue;
-    const letter = container.querySelector<HTMLElement>(
-      `[data-index="${station.cursorIndex}"]`,
-    );
-    if (!letter) continue;
-    const ghost = document.createElement("span");
-    ghost.className = `ghost-caret side-${side}`;
-    ghost.textContent = `${side} ${station.profile.displayName}`;
-    ghost.style.left = `${letter.offsetLeft}px`;
-    ghost.style.top = `${letter.offsetTop}px`;
-    container.append(ghost);
-  }
-}
-
-function raceStat(side: Side): string {
-  const station = snapshot.stations[side];
-  return `<div class="race-stat"><b>${side}</b><strong>${Math.round(station?.wpm ?? 0)}</strong><span>wpm</span><small>${(station?.accuracy ?? 100).toFixed(0)}%</small></div>`;
-}
-function emptyStats(): TypingStats {
-  return {
-    cursorIndex: 0,
-    correctChars: 0,
-    incorrectChars: 0,
-    wpm: 0,
-    raw: 0,
-    accuracy: 100,
-    consistency: 100,
-  };
-}
 function makePracticeText(): string {
   const bank =
     "the of to and a in is it you that for on are with this from have be at one word type quick light world find new work part place made live where after back only round good every think help line turn same move right want air play small end home read hand large add land here must high follow change light kind need build head stand page found school learn cover food sun between state keep never last city tree start story".split(
@@ -417,9 +420,225 @@ function mustElement<T extends Element>(
   return element;
 }
 
+const choiceCommands = <K extends keyof Preferences>(
+  key: K,
+  values: readonly Preferences[K][],
+  label: (value: Preferences[K]) => string = String,
+): Command[] =>
+  values.map((value) => ({
+    id: `${String(key)}-${String(value)}`,
+    name: label(value),
+    hint: preferences[key] === value ? "✓" : "",
+    action: () => setPreferences({ [key]: value } as Partial<Preferences>),
+  }));
+
+function preferenceToggle(
+  key: keyof Pick<
+    Preferences,
+    "smoothScrolling" | "showLiveInfo" | "showGhost" | "focusBlur" | "quietMode"
+  >,
+): Command[] {
+  return choiceCommands(key, [true, false], (value) => (value ? "on" : "off"));
+}
+
+function commandInventory(): Command[] {
+  const activeRace = isActiveCompetition(snapshot.phase);
+  const me = mySide ? snapshot.stations[mySide] : undefined;
+  return [
+    {
+      id: "theme",
+      name: "theme",
+      aliases: ["serika dracula nord terminal light"],
+      children: () =>
+        choiceCommands(
+          "theme",
+          Object.keys(themes) as (keyof typeof themes)[],
+          (value) => themes[value].label,
+        ),
+    },
+    {
+      id: "font",
+      name: "font size",
+      aliases: ["text size"],
+      children: () =>
+        choiceCommands(
+          "fontSize",
+          [1, 1.25, 1.5, 2] as const,
+          (value) => `${value}rem`,
+        ),
+    },
+    {
+      id: "caret",
+      name: "caret style",
+      aliases: ["line block outline underline"],
+      children: () =>
+        choiceCommands("caretStyle", [
+          "line",
+          "block",
+          "outline",
+          "underline",
+        ] as const),
+    },
+    {
+      id: "smooth",
+      name: "smooth caret",
+      aliases: ["off fast medium slow"],
+      children: () =>
+        choiceCommands("smoothCaret", [
+          "off",
+          "fast",
+          "medium",
+          "slow",
+        ] as const),
+    },
+    {
+      id: "scroll",
+      name: "smooth scrolling",
+      children: () => preferenceToggle("smoothScrolling"),
+    },
+    {
+      id: "live",
+      name: "live information",
+      aliases: ["wpm accuracy"],
+      children: () => preferenceToggle("showLiveInfo"),
+    },
+    {
+      id: "ghost",
+      name: "opponent ghost",
+      aliases: ["caret labels"],
+      children: () => preferenceToggle("showGhost"),
+    },
+    {
+      id: "focus",
+      name: "focus blur",
+      children: () => preferenceToggle("focusBlur"),
+    },
+    {
+      id: "quiet",
+      name: "quiet interface",
+      children: () => preferenceToggle("quietMode"),
+    },
+    {
+      id: "motion",
+      name: "motion",
+      aliases: ["reduced accessibility"],
+      children: () => choiceCommands("motion", ["system", "reduced"] as const),
+    },
+    {
+      id: "station",
+      name: "station",
+      children: () => [
+        {
+          id: "ready",
+          name: me?.ready ? "unready" : "ready up",
+          disabled: snapshot.phase !== "lobby" || !me,
+          action: () => {
+            const current = mySide ? snapshot.stations[mySide] : undefined;
+            if (snapshot.phase === "lobby" && current) {
+              send({ type: "ready", ready: !current.ready });
+            }
+          },
+        },
+        {
+          id: "leave",
+          name: "leave / change station",
+          disabled: activeRace || !me,
+          action: () => {
+            if (
+              canLeaveStation(snapshot.phase) &&
+              mySide &&
+              snapshot.stations[mySide]
+            ) {
+              send({ type: "release" });
+            }
+          },
+        },
+        {
+          id: "rematch",
+          name: "ready again",
+          disabled: snapshot.phase !== "results",
+          action: () => {
+            if (snapshot.phase === "results") send({ type: "rematch" });
+          },
+        },
+      ],
+    },
+    {
+      id: "navigation",
+      name: "navigation",
+      children: () => [
+        {
+          id: "spectate",
+          name: "leaderboard / spectate",
+          disabled: activeRace && route === "station",
+          action: () => navigate("spectator"),
+        },
+        {
+          id: "home",
+          name: "return to station",
+          action: () => navigate("station"),
+        },
+      ],
+    },
+    {
+      id: "rules",
+      name: "competition rules",
+      aliases: ["help shortcuts locked"],
+      action: () =>
+        showToast(
+          "Fixed text and timer. Escape opens settings; Tab + Enter rematches only on results.",
+        ),
+    },
+    {
+      id: "defaults",
+      name: "restore visual defaults",
+      aliases: ["reset preferences"],
+      action: () => setPreferences({ ...defaultPreferences }),
+    },
+  ];
+}
+
+const commandMenu = new CommandMenu(commandInventory, (open) => {
+  renderer?.setMenuOpen(open);
+  document.querySelector("#app")?.toggleAttribute("inert", open);
+  if (!open) renderer?.focus();
+});
+
+function navigate(next: "station" | "spectator"): void {
+  if (next === route) {
+    return;
+  }
+  if (
+    next === "spectator" &&
+    !canNavigateToSpectator(snapshot.phase, route === "spectator")
+  ) {
+    return;
+  }
+  route = next;
+  location.hash = next === "spectator" ? "#/spectate" : "#/";
+  send({
+    type: "hello",
+    role: route,
+    stationToken: route === "station" ? stationToken : undefined,
+  });
+  screenKey = "";
+  render();
+}
+
 window.addEventListener("keydown", (event) => {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.shiftKey &&
+    event.key.toLowerCase() === "p"
+  ) {
+    event.preventDefault();
+    commandMenu.toggle();
+    return;
+  }
   if (event.key === "Escape") {
-    (document.activeElement as HTMLElement | null)?.blur();
+    event.preventDefault();
+    commandMenu.toggle();
+    return;
   }
   if (event.key === "Tab") {
     tabArmedUntil = Date.now() + 1200;
@@ -435,9 +654,19 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (
+    commandMenu.isOpen ||
+    event.isComposing ||
+    isEditableTarget(event.target) ||
+    document.activeElement !== view.querySelector(".test") ||
     !typing ||
     Date.now() < typing.startedAt ||
-    (snapshot.phase !== "racing" && !practiceEndAt)
+    (snapshot.phase !== "racing" && !screenKey.startsWith("practice-")) ||
+    Date.now() >=
+      (snapshot.phase === "racing" && snapshot.race
+        ? snapshot.race.startAt +
+          snapshot.race.durationSeconds * 1000 -
+          raceOffset
+        : practiceEndAt)
   ) {
     return;
   }
@@ -451,13 +680,7 @@ window.addEventListener("keydown", (event) => {
   }
   event.preventDefault();
   const stats = typing.input(event.key);
-  renderTypingView(
-    snapshot.phase === "racing" ? `station ${mySide}` : "practice",
-    snapshot.phase === "racing" && snapshot.race !== undefined
-      ? snapshot.race.startAt - offset + snapshot.race.durationSeconds * 1000
-      : practiceEndAt,
-    typing.text,
-  );
+  renderer?.updateTyping(stats);
   if (snapshot.phase === "racing" && ++progressSequence % 2 === 0) {
     send({
       type: "progress",
@@ -469,21 +692,43 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+window.addEventListener("paste", (event) => {
+  if (renderer && document.activeElement === view.querySelector(".test")) {
+    event.preventDefault();
+  }
+});
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
 mustElement<HTMLButtonElement>(document, "#spectateButton").onclick = () => {
-  route = route === "spectator" ? "station" : "spectator";
-  location.hash = route === "spectator" ? "#/spectate" : "#/";
-  send({ type: "hello", role: route, stationToken });
-  render();
+  navigate(route === "spectator" ? "station" : "spectator");
 };
 mustElement<HTMLButtonElement>(document, "#homeButton").onclick = () => {
-  route = "station";
-  location.hash = "#/";
-  render();
+  navigate("station");
 };
 mustElement<HTMLButtonElement>(document, "#themeButton").onclick = () =>
-  document.documentElement.classList.toggle("light");
+  commandMenu.open();
+mustElement<HTMLButtonElement>(document, "#themeButton").textContent =
+  themes[preferences.theme].label.toLowerCase();
 window.addEventListener("hashchange", () => {
-  route = location.hash === "#/spectate" ? "spectator" : "station";
-  render();
+  const requested = location.hash === "#/spectate" ? "spectator" : "station";
+  if (requested === route) {
+    return;
+  }
+  if (
+    requested === "spectator" &&
+    route === "station" &&
+    isActiveCompetition(snapshot.phase)
+  ) {
+    history.replaceState(null, "", "#/");
+    return;
+  }
+  navigate(requested);
 });
 connect();
