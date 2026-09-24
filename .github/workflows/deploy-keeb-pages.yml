@@ -2,7 +2,7 @@ name: Deploy Monkeytype Duel to Pages
 
 on:
   push:
-    branches: [codex/github-pages-rebuild]
+    branches: [dev]
     paths:
       - "duel-app/client/**"
       - "duel-app/shared/**"
