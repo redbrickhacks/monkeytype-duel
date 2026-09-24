@@ -1,0 +1,30 @@
+{
+  "name": "@monkeytype/duel-app",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-3.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n web,server -c yellow,cyan \"vite --host 0.0.0.0\" \"tsx watch server/index.ts\"",
+    "build": "vite build && tsc -p tsconfig.server.json && cp -R server/data dist-server/server/",
+    "start": "node dist-server/server/index.js",
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "express": "^5.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.5.2",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7",
+    "vitest": "^3.2.4"
+  }
+}

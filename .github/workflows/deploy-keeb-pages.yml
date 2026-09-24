@@ -1,0 +1,51 @@
+name: Deploy Monkeytype Duel to Pages
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "duel-app/client/**"
+      - "duel-app/shared/**"
+      - "duel-app/package.json"
+      - "duel-app/vite.config.ts"
+      - ".github/workflows/deploy-keeb-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.6.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @monkeytype/duel-app
+      - run: pnpm --dir duel-app build
+        env:
+          VITE_API_URL: https://api.keeb.makerspace.tools
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: duel-app/dist-web
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

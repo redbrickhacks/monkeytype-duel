@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#323437" />
+    <meta name="description" content="A live, head-to-head Monkeytype duel." />
+    <title>monkeytype duel</title>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <button class="brand" id="homeButton" aria-label="Monkeytype duel home">
+          <svg viewBox="-680 -1030 300 180" aria-hidden="true">
+            <path
+              d="M-430-910c5.5 0 10 4.5 10 10s-4.5 10-10 10-10-4.5-10-10 4.5-10 10-10zm-140 0h60c5.5 0 10 4.5 10 10s-4.5 10-10 10h-60c-5.5 0-10-4.5-10-10s4.5-10 10-10zm-20-60c5.5 0 10 4.5 10 10v20c0 5.5-4.5 10-10 10s-10-4.5-10-10v-20c0-5.5 4.5-10 10-10zm-50 9.5c.3-16.3 13.6-29.5 30-29.5 7.7 0 14.7 2.9 20 7.6 5.3-4.7 12.3-7.6 20-7.6 16.4 0 29.7 13.2 30 29.5v20.5c0 5.5-4.5 10-10 10s-10-4.5-10-10v-20c0-5.5-4.5-10-10-10s-10 4.5-10 10v20c0 5.5-4.5 10-10 10s-10-4.5-10-10v-20c0-5.5-4.5-10-10-10s-10 4.5-10 10v20c0 5.5-4.5 10-10 10s-10-4.5-10-10v-20.5zm180 30.5v30c0 5.5-4.5 10-10 10s-10-4.5-10-10v-30h-28.8c-6.2 0-11.2-4.5-11.2-10s5-10 11.2-10h77.6c6.2 0 11.2 4.5 11.2 10s-5 10-11.2 10H-460zm-10-60h40c5.5 0 10 4.5 10 10s-4.5 10-10 10h-40c-5.5 0-10-4.5-10-10s4.5-10 10-10zm-160 80h20c5.5 0 10 4.5 10 10s-4.5 10-10 10h-20c-5.5 0-10-4.5-10-10s4.5-10 10-10zm115-80h5c5.5 0 10 4.5 10 10s-4.5 10-10 10h-5c-5.5 0-10-4.5-10-10s4.5-10 10-10zm-145 80h-20v-70c0-27.6 22.4-50 50-50h200c27.6 0 50 22.4 50 50v80c0 27.6-22.4 50-50 50h-200c-27.6 0-50-22.4-50-50v-20h20v20c0 16.6 13.4 30 30 30h200c16.6 0 30-13.4 30-30v-80c0-16.6-13.4-30-30-30h-200c-16.6 0-30 13.4-30 30v70z"
+            />
+          </svg>
+          <span class="brand-copy">
+            <small>monkey see</small>
+            <strong>
+              monkeytype
+              <em>duel</em>
+            </strong>
+          </span>
+        </button>
+        <nav aria-label="Primary">
+          <button
+            id="spectateButton"
+            class="icon-button"
+            title="Spectate and leaderboard"
+          >
+            ♛
+          </button>
+          <span
+            id="connectionStatus"
+            class="connection"
+            title="Realtime connection"
+          >
+            offline
+          </span>
+        </nav>
+      </header>
+      <main id="view" aria-live="polite"></main>
+      <footer>
+        <span>esc</span>
+        unfocus
+        <span>tab</span>
+        +
+        <span>enter</span>
+        ready again
+        <button id="themeButton">serika dark</button>
+      </footer>
+      <div id="toast" role="status"></div>
+    </div>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>
