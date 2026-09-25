@@ -25,11 +25,19 @@ export function parseClientMessage(value: unknown): ClientMessage {
         throw new Error("Invalid station claim.");
       }
       return value as ClientMessage;
+    case "reserveSide":
+      if (
+        (value.side !== "L" && value.side !== "R") ||
+        typeof value.selectedAt !== "number" ||
+        !Number.isFinite(value.selectedAt)
+      ) {
+        throw new Error("Invalid side reservation.");
+      }
+      return value as ClientMessage;
     case "practiceStart":
     case "practiceComplete":
     case "skipPractice":
     case "release":
-    case "rematch":
     case "activity":
       return value as ClientMessage;
     case "clientLog":
@@ -39,11 +47,6 @@ export function parseClientMessage(value: unknown): ClientMessage {
         value.message.length > 500
       ) {
         throw new Error("Invalid client log message.");
-      }
-      return value as ClientMessage;
-    case "ready":
-      if (typeof value.ready !== "boolean") {
-        throw new Error("Invalid ready message.");
       }
       return value as ClientMessage;
     case "progress":

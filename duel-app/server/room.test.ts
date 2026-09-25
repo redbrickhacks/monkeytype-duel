@@ -24,6 +24,16 @@ const right: PublicProfile = {
   avatarUrl: "https://example.com/r.png",
 };
 
+function reserveAndClaim(
+  room: DuelRoom,
+  client: ReturnType<DuelRoom["addClient"]>,
+  side: "L" | "R",
+  profile: PublicProfile,
+): void {
+  room.handle(client, { type: "reserveSide", side, selectedAt: Date.now() });
+  room.claim(client, side, profile);
+}
+
 describe("DuelRoom", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -47,7 +57,7 @@ describe("DuelRoom", () => {
     });
   });
 
-  it("requires two practices and starts one synchronized race when both players are ready", () => {
+  it("starts one synchronized race ten seconds after both practices finish", () => {
     const database = {
       saveProfile: vi.fn(),
       leaderboard: vi.fn(() => []),
@@ -58,19 +68,17 @@ describe("DuelRoom", () => {
       rSocket = new FakeSocket();
     const lClient = room.addClient(lSocket as never),
       rClient = room.addClient(rSocket as never);
-    room.claim(lClient, "L", left);
-    room.claim(rClient, "R", right);
+    reserveAndClaim(room, lClient, "L", left);
+    reserveAndClaim(room, rClient, "R", right);
     for (let i = 0; i < 2; i++) {
       room.handle(lClient, { type: "practiceStart" });
       room.handle(lClient, { type: "practiceComplete" });
       room.handle(rClient, { type: "practiceStart" });
       room.handle(rClient, { type: "practiceComplete" });
     }
-    room.handle(lClient, { type: "ready", ready: true });
-    room.handle(rClient, { type: "ready", ready: true });
     expect(room.snapshot().phase).toBe("countdown");
-    expect(room.snapshot().race?.startAt).toBe(1_004_000);
-    vi.advanceTimersByTime(4_000);
+    expect(room.snapshot().race?.startAt).toBe(1_010_000);
+    vi.advanceTimersByTime(10_000);
     expect(room.snapshot().phase).toBe("racing");
   });
 
@@ -84,14 +92,45 @@ describe("DuelRoom", () => {
     const first = room.addClient(new FakeSocket() as never);
     const secondSocket = new FakeSocket();
     const second = room.addClient(secondSocket as never);
-    room.claim(first, "L", left);
-    room.claim(second, "R", left);
+    reserveAndClaim(room, first, "L", left);
+    reserveAndClaim(room, second, "R", left);
     expect(room.snapshot().stations.R).toBeUndefined();
     expect(
       secondSocket.messages.some(
         (value) => (value as { type?: string }).type === "error",
       ),
     ).toBe(true);
+  });
+
+  it("locks a side on selection and uses the earliest client epoch", () => {
+    const database = {
+      saveProfile: vi.fn(),
+      leaderboard: vi.fn(() => []),
+      saveRace: vi.fn(),
+    };
+    const room = new DuelRoom(database as never, ["type"]);
+    const laterSocket = new FakeSocket();
+    const earlierSocket = new FakeSocket();
+    const later = room.addClient(laterSocket as never);
+    const earlier = room.addClient(earlierSocket as never);
+    room.handle(later, { type: "reserveSide", side: "L", selectedAt: 999_900 });
+    room.handle(earlier, {
+      type: "reserveSide",
+      side: "L",
+      selectedAt: 999_800,
+    });
+    expect(room.snapshot().reservations.L?.selectedAt).toBe(999_800);
+    expect(
+      laterSocket.messages.some(
+        (value) =>
+          (value as { type?: string; granted?: boolean }).type ===
+            "reservation" && (value as { granted?: boolean }).granted === false,
+      ),
+    ).toBe(true);
+    room.claim(later, "L", left);
+    expect(room.snapshot().stations.L).toBeUndefined();
+    room.claim(earlier, "L", left);
+    expect(room.snapshot().stations.L?.profile.login).toBe("left");
   });
 
   it("only times out an active practice and resets on activity", () => {
@@ -103,7 +142,7 @@ describe("DuelRoom", () => {
     const room = new DuelRoom(database as never, ["type"]);
     const socket = new FakeSocket();
     const client = room.addClient(socket as never);
-    room.claim(client, "L", left);
+    reserveAndClaim(room, client, "L", left);
 
     expect(room.snapshot().stations.L?.afkWarningAt).toBeUndefined();
     vi.advanceTimersByTime(30_000);
@@ -132,7 +171,7 @@ describe("DuelRoom", () => {
     };
     const room = new DuelRoom(database as never, ["type"]);
     const client = room.addClient(new FakeSocket() as never);
-    room.claim(client, "L", left);
+    reserveAndClaim(room, client, "L", left);
     for (let i = 0; i < 2; i++) {
       room.handle(client, { type: "practiceStart" });
       room.handle(client, { type: "practiceComplete" });
@@ -151,7 +190,7 @@ describe("DuelRoom", () => {
     };
     const room = new DuelRoom(database as never, ["type"]);
     const client = room.addClient(new FakeSocket() as never);
-    room.claim(client, "L", left);
+    reserveAndClaim(room, client, "L", left);
     room.handle(client, { type: "skipPractice" });
     expect(room.snapshot().stations.L?.practiceCount).toBe(1);
     room.handle(client, { type: "skipPractice" });
@@ -170,20 +209,18 @@ describe("DuelRoom", () => {
     };
     const room = new DuelRoom(database as never, ["type"]);
     const practiceClient = room.addClient(new FakeSocket() as never);
-    room.claim(practiceClient, "L", left);
+    reserveAndClaim(room, practiceClient, "L", left);
     room.removeClient(practiceClient);
     expect(room.snapshot().stations.L).toBeUndefined();
 
     const leftClient = room.addClient(new FakeSocket() as never);
     const rightClient = room.addClient(new FakeSocket() as never);
-    room.claim(leftClient, "L", left);
-    room.claim(rightClient, "R", right);
+    reserveAndClaim(room, leftClient, "L", left);
+    reserveAndClaim(room, rightClient, "R", right);
     for (let index = 0; index < 2; index++) {
       room.handle(leftClient, { type: "skipPractice" });
       room.handle(rightClient, { type: "skipPractice" });
     }
-    room.handle(leftClient, { type: "ready", ready: true });
-    room.handle(rightClient, { type: "ready", ready: true });
     expect(room.snapshot().phase).toBe("countdown");
     room.removeClient(leftClient);
     expect(room.snapshot().stations.L).toBeDefined();
@@ -200,17 +237,15 @@ describe("DuelRoom", () => {
     const room = new DuelRoom(database as never, ["type"], 30);
     const lClient = room.addClient(new FakeSocket() as never);
     const rClient = room.addClient(new FakeSocket() as never);
-    room.claim(lClient, "L", left);
-    room.claim(rClient, "R", right);
+    reserveAndClaim(room, lClient, "L", left);
+    reserveAndClaim(room, rClient, "R", right);
     for (let i = 0; i < 2; i++) {
       room.handle(lClient, { type: "practiceStart" });
       room.handle(lClient, { type: "practiceComplete" });
       room.handle(rClient, { type: "practiceStart" });
       room.handle(rClient, { type: "practiceComplete" });
     }
-    room.handle(lClient, { type: "ready", ready: true });
-    room.handle(rClient, { type: "ready", ready: true });
-    vi.advanceTimersByTime(4_000);
+    vi.advanceTimersByTime(10_000);
     const result = {
       wpm: 80,
       raw: 90,
@@ -223,7 +258,7 @@ describe("DuelRoom", () => {
     room.handle(rClient, { type: "finish", result });
 
     expect(room.snapshot().phase).toBe("results");
-    expect(room.snapshot().resultsResetAt).toBe(1_019_000);
+    expect(room.snapshot().resultsResetAt).toBe(1_025_000);
     vi.advanceTimersByTime(14_999);
     expect(room.snapshot().stations.L).toBeDefined();
     vi.advanceTimersByTime(1);

@@ -6,6 +6,9 @@ const socket = new WebSocket(
 );
 let token;
 let claimed = false;
+let reserved = false;
+let lastPracticeCount = -1;
+let finishSent = false;
 
 socket.on("open", () =>
   socket.send(JSON.stringify({ type: "hello", role: "station" })),
@@ -14,37 +17,40 @@ socket.on("message", (raw) => {
   const message = JSON.parse(raw.toString());
   if (message.type === "snapshot") {
     const station = message.snapshot.stations.R;
-    if (!claimed && !station) {
-      claimed = true;
+    if (!reserved && !station && !message.snapshot.reservations.R) {
+      reserved = true;
       socket.send(
         JSON.stringify({
-          type: "claim",
+          type: "reserveSide",
           side: "R",
-          githubLogin: process.env.DUEL_GITHUB_LOGIN ?? "defunkt",
+          selectedAt: Date.now(),
         }),
       );
     }
-    if (station && token && station.practiceCount < 2) {
-      socket.send(JSON.stringify({ type: "practiceComplete" }));
+    if (
+      station &&
+      token &&
+      station.practiceCount < 2 &&
+      station.practiceCount !== lastPracticeCount
+    ) {
+      lastPracticeCount = station.practiceCount;
+      socket.send(JSON.stringify({ type: "skipPractice" }));
     }
     if (
       station &&
       token &&
       station.practiceCount >= 2 &&
-      !station.ready &&
-      message.snapshot.phase !== "countdown" &&
-      message.snapshot.phase !== "racing" &&
-      message.snapshot.phase !== "results"
+      message.snapshot.phase === "racing" &&
+      !finishSent
     ) {
-      socket.send(JSON.stringify({ type: "ready", ready: true }));
-    }
-    if (message.snapshot.phase === "racing" && message.snapshot.race) {
+      finishSent = true;
       socket.send(
         JSON.stringify({
           type: "progress",
           sequence: Date.now(),
           cursorIndex: 24,
           wpm: 82,
+          raw: 85,
           accuracy: 98,
         }),
       );
@@ -69,7 +75,17 @@ socket.on("message", (raw) => {
   }
   if (message.type === "claimed") {
     token = message.stationToken;
+    claimed = true;
     console.log(`claimed station ${message.side} as ${message.profile.login}`);
+  }
+  if (message.type === "reservation" && message.granted && !claimed) {
+    socket.send(
+      JSON.stringify({
+        type: "claim",
+        side: "R",
+        githubLogin: process.env.DUEL_GITHUB_LOGIN ?? "defunkt",
+      }),
+    );
   }
   if (message.type === "error") console.error(message.message);
 });

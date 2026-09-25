@@ -315,8 +315,11 @@ export class TypingRenderer {
 
     if (owner === "local") this.adjustScroll(target);
     const targetRect = target.getBoundingClientRect();
-    const x = target.offsetLeft;
-    const y = target.offsetTop;
+    const trackRect = this.track.getBoundingClientRect();
+    // Letters are inside inline word wrappers while carets are positioned on
+    // the full track, so calculate both in the track's coordinate space.
+    const x = targetRect.left - trackRect.left;
+    const y = targetRect.top - trackRect.top;
     const previousTop = this.lastCaretTops.get(owner) ?? y;
     const lineChanged = Math.abs(y - previousTop) > targetRect.height / 2;
     caret.classList.toggle("snap", snap || lineChanged);
@@ -337,20 +340,24 @@ export class TypingRenderer {
     const lineHeight =
       Number.parseFloat(getComputedStyle(this.track).lineHeight) ||
       target.getBoundingClientRect().height;
-    const firstLineTop = this.letters[0]?.offsetTop ?? 0;
+    const trackRect = this.track.getBoundingClientRect();
+    const firstLetter = this.letters[0];
+    const firstLineTop =
+      firstLetter !== undefined
+        ? firstLetter.getBoundingClientRect().top - trackRect.top
+        : 0;
+    const targetTop = target.getBoundingClientRect().top - trackRect.top;
     const line = Math.max(
       0,
-      Math.round((target.offsetTop - firstLineTop) / lineHeight),
+      Math.round((targetTop - firstLineTop) / lineHeight),
     );
     const nextOffset = Math.max(0, (line - 1) * lineHeight);
     if (Math.abs(nextOffset - this.scrollOffset) < 1) return;
     this.scrollOffset = nextOffset;
     const firstVisibleTop = firstLineTop + Math.max(0, line - 1) * lineHeight;
     for (const word of this.words) {
-      word.classList.toggle(
-        "above-scroll",
-        word.offsetTop < firstVisibleTop - 1,
-      );
+      const wordTop = word.getBoundingClientRect().top - trackRect.top;
+      word.classList.toggle("above-scroll", wordTop < firstVisibleTop - 1);
     }
     this.track.style.transform = `translateY(-${nextOffset}px)`;
   }

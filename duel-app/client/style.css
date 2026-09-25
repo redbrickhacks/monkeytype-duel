@@ -217,6 +217,11 @@ h3 {
   background: var(--main);
   transform: translateY(-2px);
 }
+.side.pending {
+  color: var(--main);
+  outline: 2px solid var(--main);
+  outline-offset: 3px;
+}
 .side small {
   display: block;
   font-size: 0.7rem;
@@ -269,6 +274,10 @@ label {
 }
 .profile-input button {
   border-radius: 0;
+}
+.profile-input :disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 .primary {
   min-width: 12rem;
@@ -348,6 +357,114 @@ label {
 }
 .station-card.empty {
   color: var(--sub);
+}
+.live-duel {
+  width: min(100%, 1120px);
+  text-align: center;
+}
+.live-duel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+.live-duelist {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(1.25rem, 3vw, 2.5rem);
+  border: 2px solid transparent;
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--sub-alt);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+.live-duelist.leading {
+  border-color: var(--main);
+  box-shadow: 0 0 2.5rem color-mix(in srgb, var(--main) 30%, transparent);
+  transform: translateY(-0.35rem);
+}
+.live-duelist.leading::after {
+  content: "leading";
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  color: var(--main);
+  font-size: 0.75rem;
+  animation: leader-pulse 900ms ease-in-out infinite alternate;
+}
+.live-player {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 0.65rem;
+  text-align: left;
+}
+.live-player > b {
+  color: var(--main);
+}
+.live-player img {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+}
+.live-player small {
+  grid-column: 3;
+  color: var(--sub);
+}
+.live-speed {
+  margin: 2.5rem 0 1.5rem;
+}
+.live-speed strong {
+  display: block;
+  color: var(--text);
+  font-size: clamp(5rem, 12vw, 9rem);
+  font-weight: 400;
+  line-height: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+.live-speed span {
+  color: var(--main);
+}
+.live-secondary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  color: var(--sub);
+  font-size: 0.75rem;
+}
+.live-secondary b {
+  display: block;
+  color: var(--text);
+  font-size: 1.1rem;
+}
+.live-progress {
+  height: 0.25rem;
+  margin-top: 1.5rem;
+  background: var(--bg);
+  border-radius: 99px;
+}
+.live-progress i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--main);
+  transition: width 100ms linear;
+}
+.live-countdown {
+  min-height: 1em;
+  color: var(--main);
+  font-size: clamp(5rem, 15vw, 10rem);
+  line-height: 1;
+}
+.live-race-status {
+  color: var(--sub);
+}
+@keyframes leader-pulse {
+  to {
+    opacity: 0.45;
+  }
 }
 .lobby-actions {
   display: flex;
@@ -1048,6 +1165,9 @@ footer span {
   color: white;
 }
 @media (max-width: 650px) {
+  .live-duel-grid {
+    grid-template-columns: 1fr;
+  }
   #app {
     width: min(100% - 1.5rem, 1200px);
     padding: 1rem 0;

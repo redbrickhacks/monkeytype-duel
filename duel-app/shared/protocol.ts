@@ -21,6 +21,7 @@ export type StationState = {
   connected: boolean;
   cursorIndex: number;
   wpm: number;
+  rawWpm: number;
   accuracy: number;
   afkWarningAt?: number;
   afkResetAt?: number;
@@ -56,6 +57,9 @@ export type LeaderboardEntry = {
 export type RoomSnapshot = {
   phase: RoomPhase;
   stations: Partial<Record<Side, StationState>>;
+  reservations: Partial<
+    Record<Side, { selectedAt: number; expiresAt: number }>
+  >;
   race?: RaceDefinition;
   results: RaceResult[];
   leaderboard: LeaderboardEntry[];
@@ -65,16 +69,17 @@ export type RoomSnapshot = {
 
 export type ClientMessage =
   | { type: "hello"; role: "station" | "spectator"; stationToken?: string }
+  | { type: "reserveSide"; side: Side; selectedAt: number }
   | { type: "claim"; side: Side; githubLogin: string }
   | { type: "practiceStart" }
   | { type: "practiceComplete" }
   | { type: "skipPractice" }
-  | { type: "ready"; ready: boolean }
   | {
       type: "progress";
       sequence: number;
       cursorIndex: number;
       wpm: number;
+      raw?: number;
       accuracy: number;
     }
   | {
@@ -82,7 +87,6 @@ export type ClientMessage =
       result: Omit<RaceResult, "side" | "profile" | "finishedAt">;
     }
   | { type: "release" }
-  | { type: "rematch" }
   | { type: "activity" }
   | { type: "clientLog"; level: "warn" | "error"; message: string };
 
@@ -93,6 +97,13 @@ export type ServerMessage =
       side: Side;
       stationToken: string;
       profile: PublicProfile;
+    }
+  | {
+      type: "reservation";
+      side: Side;
+      selectedAt: number;
+      granted: boolean;
+      message?: string;
     }
   | { type: "error"; message: string }
   | { type: "control"; action: "refresh" }

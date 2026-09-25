@@ -8,10 +8,18 @@ describe("parseClientMessage", () => {
     ).toEqual({ type: "claim", side: "L", githubLogin: "octocat" });
     expect(
       parseClientMessage({
+        type: "reserveSide",
+        side: "L",
+        selectedAt: 1_000,
+      }),
+    ).toMatchObject({ type: "reserveSide", side: "L" });
+    expect(
+      parseClientMessage({
         type: "progress",
         sequence: 1,
         cursorIndex: 5,
         wpm: 80,
+        raw: 84,
         accuracy: 98,
       }),
     ).toMatchObject({ type: "progress", cursorIndex: 5 });

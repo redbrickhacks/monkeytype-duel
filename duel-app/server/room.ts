@@ -19,6 +19,12 @@ type Client = {
   side?: Side;
   token?: string;
 };
+type Reservation = {
+  client: Client;
+  selectedAt: number;
+  expiresAt: number;
+  order: number;
+};
 type Station = {
   token: string;
   socket?: WebSocket;
@@ -31,10 +37,14 @@ type Station = {
 const AFK_WARNING_MS = 10_000;
 const AFK_RESET_MS = 20_000;
 const RESULTS_RESET_MS = 15_000;
+const FINAL_COUNTDOWN_MS = 10_000;
+const RESERVATION_MS = 60_000;
 
 export class DuelRoom {
   private readonly clients = new Set<Client>();
   private readonly stations = new Map<Side, Station>();
+  private readonly reservations = new Map<Side, Reservation>();
+  private reservationOrder = 0;
   private race?: RaceDefinition;
   private results: RaceResult[] = [];
   private phase: RoomSnapshot["phase"] = "registration";
@@ -62,6 +72,7 @@ export class DuelRoom {
 
   removeClient(client: Client): void {
     this.clients.delete(client);
+    this.releaseReservation(client);
     if (!client.side) return;
     const station = this.stations.get(client.side);
     if (station && station.token === client.token) {
@@ -115,8 +126,16 @@ export class DuelRoom {
   }
 
   claim(client: Client, side: Side, profile: PublicProfile): void {
+    const reservation = this.reservations.get(side);
+    if (reservation?.client !== client || reservation.expiresAt <= Date.now()) {
+      this.send(client, {
+        type: "error",
+        message: `Station ${side} is no longer reserved for this screen. Select it again.`,
+      });
+      return;
+    }
     const existing = this.stations.get(side);
-    if (existing?.connected) {
+    if (existing) {
       this.send(client, {
         type: "error",
         message: `Station ${side} is already in use.`,
@@ -143,6 +162,7 @@ export class DuelRoom {
       connected: true,
       cursorIndex: 0,
       wpm: 0,
+      rawWpm: 0,
       accuracy: 100,
       token,
       socket: client.socket,
@@ -151,6 +171,7 @@ export class DuelRoom {
       afkWarned: false,
       practiceActive: false,
     };
+    this.reservations.delete(side);
     this.stations.set(side, station);
     client.role = "station";
     client.side = side;
@@ -169,6 +190,10 @@ export class DuelRoom {
     }
     if (message.type === "clientLog") {
       logEvent(message.level, client.side ?? "leaderboard", message.message);
+      return;
+    }
+    if (message.type === "reserveSide") {
+      this.reserveSide(client, message.side, message.selectedAt);
       return;
     }
     const station = client.side ? this.stations.get(client.side) : undefined;
@@ -216,20 +241,6 @@ export class DuelRoom {
         );
         this.advancePractice(station);
         break;
-      case "ready":
-        if (station.practiceCount < 2) {
-          this.send(client, {
-            type: "error",
-            message: "Complete both practice runs first.",
-          });
-          return;
-        }
-        station.ready = message.ready;
-        station.practiceActive = false;
-        this.phase = "lobby";
-        this.broadcast();
-        this.maybeStart();
-        break;
       case "progress":
         if (
           this.phase !== "racing" ||
@@ -240,6 +251,7 @@ export class DuelRoom {
         station.lastSequence = message.sequence;
         station.cursorIndex = Math.max(0, message.cursorIndex);
         station.wpm = Math.max(0, message.wpm);
+        station.rawWpm = Math.max(0, message.raw ?? message.wpm);
         station.accuracy = Math.max(0, Math.min(100, message.accuracy));
         this.broadcast();
         break;
@@ -248,12 +260,6 @@ export class DuelRoom {
         break;
       case "release":
         this.release(client);
-        break;
-      case "rematch":
-        if (this.phase !== "results") return;
-        station.ready = true;
-        this.broadcast();
-        this.maybeStart();
         break;
       default:
         break;
@@ -271,6 +277,7 @@ export class DuelRoom {
     }
     const side = client.side;
     this.stations.delete(side);
+    this.releaseReservation(client);
     client.side = undefined;
     client.token = undefined;
     this.phase = "registration";
@@ -291,6 +298,7 @@ export class DuelRoom {
       return;
     }
     this.stations.delete(target);
+    this.reservations.delete(target);
     for (const client of this.clients) {
       if (client.side === target) {
         client.side = undefined;
@@ -335,6 +343,7 @@ export class DuelRoom {
 
   snapshot(): RoomSnapshot {
     const stations: RoomSnapshot["stations"] = {};
+    const reservations: RoomSnapshot["reservations"] = {};
     for (const [side, station] of this.stations) {
       stations[side] = {
         side,
@@ -344,6 +353,7 @@ export class DuelRoom {
         connected: station.connected,
         cursorIndex: station.cursorIndex,
         wpm: station.wpm,
+        rawWpm: station.rawWpm,
         accuracy: station.accuracy,
         ...(station.practiceActive
           ? {
@@ -353,9 +363,16 @@ export class DuelRoom {
           : {}),
       };
     }
+    for (const [side, reservation] of this.reservations) {
+      reservations[side] = {
+        selectedAt: reservation.selectedAt,
+        expiresAt: reservation.expiresAt,
+      };
+    }
     return {
       phase: this.phase,
       stations,
+      reservations,
       race: this.race,
       results: this.results,
       leaderboard: this.database.leaderboard(),
@@ -364,18 +381,27 @@ export class DuelRoom {
     };
   }
 
-  private maybeStart(): void {
+  private maybeStart(): boolean {
     const left = this.stations.get("L"),
       right = this.stations.get("R");
-    if (!left?.ready || !right?.ready || !left.connected || !right.connected) {
-      return;
+    if (
+      this.race !== undefined ||
+      left === undefined ||
+      right === undefined ||
+      left.practiceCount < 2 ||
+      right.practiceCount < 2 ||
+      !left.connected ||
+      !right.connected
+    ) {
+      return false;
     }
     for (const station of [left, right]) {
       station.practiceActive = false;
       station.afkWarned = false;
-      station.ready = false;
+      station.ready = true;
       station.cursorIndex = 0;
       station.wpm = 0;
+      station.rawWpm = 0;
       station.accuracy = 100;
       station.lastSequence = -1;
     }
@@ -383,7 +409,7 @@ export class DuelRoom {
     this.race = {
       id: randomUUID(),
       text: createRaceText(this.words),
-      startAt: Date.now() + 4_000,
+      startAt: Date.now() + FINAL_COUNTDOWN_MS,
       durationSeconds: this.durationSeconds,
     };
     this.phase = "countdown";
@@ -398,12 +424,13 @@ export class DuelRoom {
         this.phase = "racing";
         this.broadcast();
       }
-    }, 4_000);
+    }, FINAL_COUNTDOWN_MS);
     clearTimeout(this.raceTimer);
     this.raceTimer = setTimeout(
       () => this.finalize(),
-      4_000 + this.durationSeconds * 1_000 + 1_500,
+      FINAL_COUNTDOWN_MS + this.durationSeconds * 1_000 + 1_500,
     );
+    return true;
   }
 
   private finish(
@@ -477,11 +504,26 @@ export class DuelRoom {
     if ([...this.stations.values()].some((item) => item.practiceCount >= 2)) {
       this.phase = "lobby";
     }
-    this.broadcast();
+    if (!this.maybeStart()) this.broadcast();
   }
 
   private checkAfk(): void {
     const now = Date.now();
+    let reservationsChanged = false;
+    for (const [side, reservation] of this.reservations) {
+      if (reservation.expiresAt <= now) {
+        this.reservations.delete(side);
+        reservationsChanged = true;
+        this.send(reservation.client, {
+          type: "reservation",
+          side,
+          selectedAt: reservation.selectedAt,
+          granted: false,
+          message: "Side reservation expired. Select a side again.",
+        });
+      }
+    }
+    if (reservationsChanged) this.broadcast();
     for (const [side, station] of this.stations) {
       if (!station.practiceActive) continue;
       if (now >= station.lastActivityAt + AFK_RESET_MS) {
@@ -518,6 +560,7 @@ export class DuelRoom {
   private resetRoom(reason: string): void {
     this.clearRaceTimers();
     this.stations.clear();
+    this.reservations.clear();
     this.results = [];
     this.race = undefined;
     this.phase = "registration";
@@ -541,6 +584,87 @@ export class DuelRoom {
     if (client.socket.readyState === client.socket.OPEN) {
       client.socket.send(JSON.stringify(message));
     }
+  }
+
+  private reserveSide(
+    client: Client,
+    side: Side,
+    clientSelectedAt: number,
+  ): void {
+    if (client.side !== undefined || this.stations.has(side)) {
+      this.send(client, {
+        type: "reservation",
+        side,
+        selectedAt: clientSelectedAt,
+        granted: false,
+        message: `Station ${side} is already in use.`,
+      });
+      return;
+    }
+    const now = Date.now();
+    // Client epoch time resolves near-simultaneous selections. The clamp keeps
+    // a bad kiosk clock from holding an unfair, indefinitely early timestamp.
+    const selectedAt = Math.max(
+      now - 5_000,
+      Math.min(now + 1_000, clientSelectedAt),
+    );
+    const order = ++this.reservationOrder;
+    const candidate: Reservation = {
+      client,
+      selectedAt,
+      expiresAt: now + RESERVATION_MS,
+      order,
+    };
+    const current = this.reservations.get(side);
+    const wins =
+      current === undefined ||
+      current.expiresAt <= now ||
+      selectedAt < current.selectedAt ||
+      (selectedAt === current.selectedAt && order < current.order) ||
+      current.client === client;
+    if (!wins) {
+      this.send(client, {
+        type: "reservation",
+        side,
+        selectedAt,
+        granted: false,
+        message: `Station ${side} was selected on another screen first.`,
+      });
+      return;
+    }
+    for (const [reservedSide, reservation] of this.reservations) {
+      if (reservation.client === client && reservedSide !== side) {
+        this.reservations.delete(reservedSide);
+      }
+    }
+    if (current !== undefined && current.client !== client) {
+      this.send(current.client, {
+        type: "reservation",
+        side,
+        selectedAt: current.selectedAt,
+        granted: false,
+        message: `Station ${side} was selected on another screen first.`,
+      });
+    }
+    this.reservations.set(side, candidate);
+    this.send(client, {
+      type: "reservation",
+      side,
+      selectedAt,
+      granted: true,
+    });
+    this.broadcast();
+  }
+
+  private releaseReservation(client: Client): void {
+    let changed = false;
+    for (const [side, reservation] of this.reservations) {
+      if (reservation.client === client) {
+        this.reservations.delete(side);
+        changed = true;
+      }
+    }
+    if (changed) this.broadcast();
   }
 }
 

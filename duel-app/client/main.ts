@@ -41,6 +41,7 @@ let reconnectTimer: number | undefined;
 let snapshot: RoomSnapshot = {
   phase: "registration",
   stations: {},
+  reservations: {},
   results: [],
   leaderboard: [],
   serverNow: Date.now(),
@@ -51,6 +52,8 @@ localStorage.removeItem("duelStationToken");
 localStorage.removeItem("duelSide");
 let stationToken: string | undefined;
 let mySide: Side | undefined;
+let reservedSide: Side | undefined;
+let pendingSide: Side | undefined;
 let route: "station" | "spectator" =
   location.hash === "#/spectate" ? "spectator" : "station";
 let typing: TypingSession | undefined;
@@ -62,7 +65,6 @@ let practiceCompletionCount = -1;
 let finishSent = false;
 let progressSequence = 0;
 let frame = 0;
-let tabArmedUntil = 0;
 let offset = 0;
 let raceOffset = 0;
 let activeRaceId: string | undefined;
@@ -120,8 +122,19 @@ function connect(): void {
     } else if (message.type === "claimed") {
       stationToken = message.stationToken;
       mySide = message.side;
+      reservedSide = undefined;
+      pendingSide = undefined;
       finishSent = false;
       practiceCompletionCount = -1;
+      render();
+    } else if (message.type === "reservation") {
+      pendingSide = undefined;
+      if (message.granted) {
+        reservedSide = message.side;
+      } else {
+        if (reservedSide === message.side) reservedSide = undefined;
+        showToast(message.message ?? "That side is no longer available.", true);
+      }
       render();
     } else if (message.type === "error") {
       showToast(message.message, true);
@@ -226,6 +239,8 @@ function syncSide(): void {
   ) {
     stationToken = undefined;
     mySide = undefined;
+    reservedSide = undefined;
+    pendingSide = undefined;
   }
 }
 
@@ -273,45 +288,59 @@ function renderRegistration(): void {
     view
       .querySelectorAll<HTMLButtonElement>("[data-side]")
       .forEach((button) => {
+        const side = button.dataset.side as Side;
         const occupied =
-          snapshot.stations[button.dataset.side as Side] !== undefined;
+          snapshot.stations[side] !== undefined ||
+          (snapshot.reservations[side] !== undefined && reservedSide !== side);
         button.classList.toggle("taken", occupied);
+        button.classList.toggle("selected", reservedSide === side);
+        button.classList.toggle("pending", pendingSide === side);
         const small = button.querySelector("small");
         if (small) {
           small.textContent = occupied
             ? "occupied"
-            : button.dataset.side === "L"
-              ? "left"
-              : "right";
+            : pendingSide === side
+              ? "locking…"
+              : reservedSide === side
+                ? "reserved"
+                : button.dataset.side === "L"
+                  ? "left"
+                  : "right";
         }
       });
+    const enabled = reservedSide !== undefined;
+    const input = view.querySelector<HTMLInputElement>("#githubLogin");
+    const submit = view.querySelector<HTMLButtonElement>(
+      "#githubForm button[type=submit]",
+    );
+    if (input) input.disabled = !enabled;
+    if (submit) submit.disabled = !enabled;
     return;
   }
   mountScreen("registration");
   view.innerHTML = `<section class="center-stage registration">
     <p class="eyebrow">event station</p><h2>choose your side</h2>
-    <div class="side-picker"><button data-side="L" class="side ${snapshot.stations.L ? "taken" : ""}">L<small>${snapshot.stations.L ? "occupied" : "left"}</small></button><div class="versus">vs</div><button data-side="R" class="side ${snapshot.stations.R ? "taken" : ""}">R<small>${snapshot.stations.R ? "occupied" : "right"}</small></button></div>
-    <form id="githubForm"><label for="githubLogin">GitHub username</label><div class="profile-input"><span>@</span><input id="githubLogin" autocomplete="off" spellcheck="false" placeholder="octocat" required><button type="submit">find profile</button></div></form>
+    <div class="side-picker"><button data-side="L" class="side">L<small>left</small></button><div class="versus">vs</div><button data-side="R" class="side">R<small>right</small></button></div>
+    <form id="githubForm"><label for="githubLogin">GitHub username</label><div class="profile-input"><span>@</span><input id="githubLogin" autocomplete="off" spellcheck="false" placeholder="select a side first" required disabled><button type="submit" disabled>find profile</button></div></form>
     <div id="profilePreview"></div><p class="hint">Public profile lookup only — no GitHub sign-in.</p>
   </section>`;
-  let selectedSide: Side | undefined;
   view.querySelectorAll<HTMLButtonElement>("[data-side]").forEach(
     (button) =>
       (button.onclick = () => {
         if (button.classList.contains("taken")) return;
-        selectedSide = button.dataset.side as Side;
-        view
-          .querySelectorAll("[data-side]")
-          .forEach((item) =>
-            item.classList.toggle("selected", item === button),
-          );
+        const side = button.dataset.side as Side;
+        pendingSide = side;
+        button.classList.add("pending");
+        const label = button.querySelector("small");
+        if (label !== null) label.textContent = "locking…";
+        send({ type: "reserveSide", side, selectedAt: Date.now() });
       }),
   );
   mustElement<HTMLFormElement>(view, "#githubForm").onsubmit = async (
     event,
   ) => {
     event.preventDefault();
-    const side = selectedSide;
+    const side = reservedSide;
     if (side === undefined) {
       showToast("Choose L or R first.", true);
       return;
@@ -339,6 +368,7 @@ function renderRegistration(): void {
       input.disabled = false;
     }
   };
+  renderRegistration();
 }
 
 function renderPractice(count: number): void {
@@ -433,13 +463,10 @@ function mountPracticeCompleting(count: number): void {
 }
 
 function renderLobby(): void {
-  const me = mySide ? snapshot.stations[mySide] : undefined;
   const opponentSide: Side = mySide === "L" ? "R" : "L";
   const opponent = snapshot.stations[opponentSide];
   mountScreen("lobby");
-  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found" : "waiting for opponent"}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<div class="lobby-actions"><button class="primary ${me?.ready ? "ready" : ""}" id="readyButton">${me?.ready ? "ready ✓" : "ready up"}</button><button class="text-action" id="logoutStation">logout</button></div>${leaderboardMarkup()}</section>`;
-  mustElement<HTMLButtonElement>(view, "#readyButton").onclick = () =>
-    send({ type: "ready", ready: !me?.ready });
+  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found — waiting for practice" : "waiting for opponent"}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<p class="subtle">The final starts automatically with a 10 second countdown when both players finish practice.</p><div class="lobby-actions"><button class="text-action" id="logoutStation">logout</button></div>${leaderboardMarkup()}</section>`;
   mustElement<HTMLButtonElement>(view, "#logoutStation").onclick = logout;
 }
 
@@ -536,20 +563,89 @@ function finishCurrent(): void {
 function renderResults(): void {
   const sorted = [...snapshot.results].sort((a, b) => b.wpm - a.wpm);
   mountScreen("results");
-  view.innerHTML = `<section class="results"><p class="eyebrow">race complete</p><h2>${sorted.length ? `${escapeHtml(sorted[0].profile.displayName)} wins` : "no finishers"}</h2><div class="result-grid">${["L", "R"].map((side) => resultCard(side as Side)).join("")}</div><p class="result-reset">stations reset in <strong id="resultResetCountdown">15</strong>s</p><button class="primary" id="rematchButton">ready again</button>${leaderboardMarkup()}</section>`;
-  mustElement<HTMLButtonElement>(view, "#rematchButton").onclick = () =>
-    send({ type: "rematch" });
+  view.innerHTML = `<section class="results"><p class="eyebrow">race complete</p><h2>${sorted.length ? `${escapeHtml(sorted[0].profile.displayName)} wins` : "no finishers"}</h2><div class="result-grid">${["L", "R"].map((side) => resultCard(side as Side)).join("")}</div><p class="result-reset">stations log out in <strong id="resultResetCountdown">15</strong>s</p>${leaderboardMarkup()}</section>`;
   updateResultCountdown();
 }
 
 function renderSpectator(): void {
   if (snapshot.phase === "countdown" || snapshot.phase === "racing") {
-    renderRace(true);
+    renderLiveDuel();
     return;
   }
   mountScreen(`spectator-${snapshot.phase}`);
   view.innerHTML = `<section class="spectator"><p class="eyebrow">spectator mode</p><h2>${snapshot.phase === "results" ? "latest result" : "waiting for the next duel"}</h2>${snapshot.stations.L || snapshot.stations.R ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}${snapshot.phase === "results" ? `<div class="result-grid">${resultCard("L")}${resultCard("R")}</div><p class="result-reset">next players in <strong id="resultResetCountdown">15</strong>s</p>` : ""}${leaderboardMarkup()}</section>`;
   if (snapshot.phase === "results") updateResultCountdown();
+}
+
+function renderLiveDuel(): void {
+  const race = snapshot.race;
+  if (!race) return;
+  const key = `live-duel-${race.id}`;
+  if (screenKey !== key) {
+    mountScreen(key);
+    view.innerHTML = `<section class="live-duel"><p class="eyebrow">live final</p><div class="live-countdown" id="liveCountdown"></div><div class="live-duel-grid">${liveDuelCard("L")}${liveDuelCard("R")}</div><p class="live-race-status" id="liveRaceStatus"></p></section>`;
+  }
+  const left = snapshot.stations.L;
+  const right = snapshot.stations.R;
+  const leftScore = left?.wpm ?? 0;
+  const rightScore = right?.wpm ?? 0;
+  updateLiveDuelCard("L", leftScore > rightScore);
+  updateLiveDuelCard("R", rightScore > leftScore);
+  const countdown = mustElement<HTMLElement>(view, "#liveCountdown");
+  const now = Date.now() + raceOffset;
+  if (snapshot.phase === "countdown" || now < race.startAt) {
+    countdown.hidden = false;
+    countdown.textContent = String(
+      Math.max(1, Math.ceil((race.startAt - now) / 1_000)),
+    );
+  } else {
+    countdown.hidden = true;
+  }
+  mustElement<HTMLElement>(view, "#liveRaceStatus").textContent =
+    snapshot.phase === "countdown"
+      ? "final starts automatically"
+      : leftScore === rightScore
+        ? "neck and neck"
+        : `station ${leftScore > rightScore ? "L" : "R"} is leading`;
+  frame = requestAnimationFrame(renderLiveDuel);
+}
+
+function liveDuelCard(side: Side): string {
+  const station = snapshot.stations[side];
+  return `<article class="live-duelist" data-live-side="${side}"><div class="live-player"><b>${side}</b>${station ? `<img src="${escapeHtml(station.profile.avatarUrl)}" alt=""><span>${escapeHtml(station.profile.displayName)}</span>` : "<span>open station</span>"}<small data-status>waiting</small></div><div class="live-speed"><strong data-wpm>0</strong><span>wpm</span></div><div class="live-secondary"><span><b data-accuracy>100.0%</b> accuracy</span><span><b data-raw>0</b> raw wpm</span><span><b data-position>—</b> leaderboard</span></div><div class="live-progress"><i></i></div></article>`;
+}
+
+function updateLiveDuelCard(side: Side, leading: boolean): void {
+  const card = view.querySelector<HTMLElement>(`[data-live-side="${side}"]`);
+  const station = snapshot.stations[side];
+  if (!card || !station) return;
+  card.classList.toggle("leading", leading && snapshot.phase === "racing");
+  mustElement<HTMLElement>(card, "[data-wpm]").textContent = String(
+    Math.round(station.wpm),
+  );
+  mustElement<HTMLElement>(card, "[data-raw]").textContent = String(
+    Math.round(station.rawWpm),
+  );
+  mustElement<HTMLElement>(card, "[data-accuracy]").textContent =
+    `${station.accuracy.toFixed(1)}%`;
+  mustElement<HTMLElement>(card, "[data-position]").textContent =
+    `#${projectedPosition(station.wpm)}`;
+  mustElement<HTMLElement>(card, "[data-status]").textContent =
+    snapshot.results.some((result) => result.side === side)
+      ? "finished"
+      : station.connected
+        ? snapshot.phase === "countdown"
+          ? "ready"
+          : "typing live"
+        : "disconnected";
+  const progress = card.querySelector<HTMLElement>(".live-progress i");
+  if (progress && snapshot.race) {
+    progress.style.width = `${Math.min(100, (station.cursorIndex / snapshot.race.text.length) * 100)}%`;
+  }
+}
+
+function projectedPosition(wpm: number): number {
+  return 1 + snapshot.leaderboard.filter((entry) => entry.bestWpm > wpm).length;
 }
 
 function stationCard(side: Side): string {
@@ -784,17 +880,6 @@ function commandInventory(): Command[] {
       name: "station",
       children: () => [
         {
-          id: "ready",
-          name: me?.ready ? "unready" : "ready up",
-          disabled: snapshot.phase !== "lobby" || !me,
-          action: () => {
-            const current = mySide ? snapshot.stations[mySide] : undefined;
-            if (snapshot.phase === "lobby" && current) {
-              send({ type: "ready", ready: !current.ready });
-            }
-          },
-        },
-        {
           id: "skip-practice",
           name: "skip to next round",
           disabled:
@@ -809,14 +894,6 @@ function commandInventory(): Command[] {
           name: "logout",
           disabled: !me || !canLeaveStation(snapshot.phase),
           action: logout,
-        },
-        {
-          id: "rematch",
-          name: "ready again",
-          disabled: snapshot.phase !== "results",
-          action: () => {
-            if (snapshot.phase === "results") send({ type: "rematch" });
-          },
         },
       ],
     },
@@ -843,7 +920,7 @@ function commandInventory(): Command[] {
       aliases: ["help shortcuts locked"],
       action: () =>
         showToast(
-          "Fixed text and timer. Escape opens settings; Tab + Enter rematches only on results.",
+          "Fixed text and timer. Escape opens settings; restart is available only during practice.",
         ),
     },
     {
@@ -914,19 +991,6 @@ window.addEventListener("keydown", (event) => {
     commandMenu.toggle();
     return;
   }
-  if (event.key === "Tab") {
-    tabArmedUntil = Date.now() + 1200;
-    return;
-  }
-  if (
-    event.key === "Enter" &&
-    Date.now() < tabArmedUntil &&
-    snapshot.phase === "results"
-  ) {
-    event.preventDefault();
-    send({ type: "rematch" });
-    return;
-  }
   if (
     commandMenu.isOpen ||
     event.isComposing ||
@@ -961,6 +1025,7 @@ window.addEventListener("keydown", (event) => {
       sequence: progressSequence,
       cursorIndex: stats.cursorIndex,
       wpm: stats.wpm,
+      raw: stats.raw,
       accuracy: stats.accuracy,
     });
   }
