@@ -134,6 +134,10 @@ nav {
 .text-action:hover {
   color: var(--text);
 }
+.icon-button:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
 .connection {
   color: var(--sub);
   font-size: 0.7rem;
@@ -791,10 +795,38 @@ footer {
   color: var(--sub);
   font-size: 0.72rem;
 }
-.quiet-mode body:has(.test.is-typing) header,
-.quiet-mode body:has(.test.is-typing) footer,
-.quiet-mode .test.is-typing .test-label {
+.quiet-mode body:has(.test) header,
+.quiet-mode body:has(.test) footer,
+.quiet-mode .test .test-label {
   opacity: 0.45;
+}
+.test-restart {
+  display: flex;
+  margin: 1rem auto 0;
+  padding: 1em 2em;
+  color: var(--sub);
+  background: transparent;
+}
+.test-restart:hover,
+.test-restart:focus-visible {
+  color: var(--text);
+}
+.test-restart svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.practice-auto {
+  margin: 0;
+  color: var(--sub);
+  font-size: 0.8rem;
+}
+.practice-auto strong {
+  color: var(--main);
 }
 @media (prefers-reduced-motion: reduce) {
   *,

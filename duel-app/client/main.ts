@@ -48,10 +48,15 @@ let stationToken = localStorage.getItem("duelStationToken") ?? undefined;
 let mySide: Side | undefined =
   (localStorage.getItem("duelSide") as Side | null) ?? undefined;
 let route: "station" | "spectator" =
-  location.hash === "#/spectate" ? "spectator" : "station";
+  mySide === undefined && location.hash === "#/spectate"
+    ? "spectator"
+    : "station";
 let typing: TypingSession | undefined;
 let practiceText = "";
 let practiceEndAt = 0;
+let practiceAutoStartAt = 0;
+let practiceCountdownFor = -1;
+let practiceCompletionCount = -1;
 let finishSent = false;
 let progressSequence = 0;
 let frame = 0;
@@ -66,6 +71,9 @@ let preferences = loadPreferences(globalThis.localStorage);
 let afkActive = false;
 let lastActivitySentAt = 0;
 applyPreferences(preferences);
+if (mySide !== undefined && location.hash === "#/spectate") {
+  history.replaceState(null, "", "#/");
+}
 
 function setPreferences(update: Partial<Preferences>): void {
   preferences = { ...preferences, ...update };
@@ -107,6 +115,8 @@ function connect(): void {
     } else if (message.type === "claimed") {
       stationToken = message.stationToken;
       mySide = message.side;
+      finishSent = false;
+      practiceCompletionCount = -1;
       localStorage.setItem("duelStationToken", stationToken);
       localStorage.setItem("duelSide", mySide);
       render();
@@ -209,6 +219,7 @@ function syncSide(): void {
 
 function render(): void {
   cancelAnimationFrame(frame);
+  updateSpectateButton();
   if (route === "spectator") {
     renderSpectator();
     return;
@@ -319,23 +330,78 @@ function renderRegistration(): void {
 }
 
 function renderPractice(count: number): void {
+  if (finishSent && count <= practiceCompletionCount) {
+    mountPracticeCompleting(count);
+    return;
+  }
+  if (count > practiceCompletionCount) {
+    finishSent = false;
+    practiceCompletionCount = count;
+  }
   if (typing && practiceEndAt > Date.now()) {
     renderTypingView(`practice ${count + 1} of 2`, practiceEndAt, undefined);
     return;
   }
   typing = undefined;
-  mountScreen(`practice-start-${count}`);
-  view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide}</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private 30 second warm-up. Your opponent cannot see this result.</p><button class="primary" id="startPractice">start practice</button><button class="text-action" id="releaseStation">change station</button></section>`;
-  mustElement<HTMLButtonElement>(view, "#startPractice").onclick = () => {
-    practiceText = makePracticeText();
-    practiceEndAt = Date.now() + practiceSeconds * 1_000;
-    typing = new TypingSession(practiceText, Date.now());
-    lastActivitySentAt = Date.now();
-    send({ type: "practiceStart" });
-    renderTypingView(`practice ${count + 1} of 2`, practiceEndAt, undefined);
-  };
-  mustElement<HTMLButtonElement>(view, "#releaseStation").onclick = () =>
-    send({ type: "release" });
+  const key = `practice-start-${count}`;
+  if (screenKey !== key) {
+    mountScreen(key);
+    practiceCountdownFor = count;
+    practiceAutoStartAt = Date.now() + 5_000;
+    view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide}</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private 30 second warm-up. Your opponent cannot see this result.</p><p class="practice-auto">starting in <strong id="practiceAutoCountdown">5</strong></p><button class="primary" id="startPractice">start now</button><button class="text-action" id="releaseStation">change station</button></section>`;
+    mustElement<HTMLButtonElement>(view, "#startPractice").onclick = () =>
+      startPractice(count);
+    mustElement<HTMLButtonElement>(view, "#releaseStation").onclick = () =>
+      send({ type: "release" });
+  }
+  updatePracticeCountdown(count);
+}
+
+function updatePracticeCountdown(count: number): void {
+  if (
+    practiceCountdownFor !== count ||
+    screenKey !== `practice-start-${count}`
+  ) {
+    return;
+  }
+  const remaining = Math.max(0, practiceAutoStartAt - Date.now());
+  const countdown = view.querySelector<HTMLElement>("#practiceAutoCountdown");
+  if (countdown !== null) {
+    countdown.textContent = String(Math.max(1, Math.ceil(remaining / 1_000)));
+  }
+  if (remaining <= 0) {
+    startPractice(count);
+    return;
+  }
+  frame = requestAnimationFrame(() => updatePracticeCountdown(count));
+}
+
+function startPractice(count: number): void {
+  if (typing !== undefined || practiceCountdownFor !== count) return;
+  practiceCountdownFor = -1;
+  practiceText = makePracticeText();
+  const startedAt = Date.now();
+  practiceEndAt = startedAt + practiceSeconds * 1_000;
+  typing = new TypingSession(practiceText, startedAt);
+  finishSent = false;
+  lastActivitySentAt = startedAt;
+  send({ type: "practiceStart" });
+  renderTypingView(`practice ${count + 1} of 2`, practiceEndAt, undefined);
+}
+
+function restartPractice(): void {
+  const me = mySide ? snapshot.stations[mySide] : undefined;
+  if (me === undefined || me.practiceCount >= 2) return;
+  typing = undefined;
+  practiceCountdownFor = me.practiceCount;
+  startPractice(me.practiceCount);
+}
+
+function mountPracticeCompleting(count: number): void {
+  const key = `practice-completing-${count}`;
+  if (screenKey === key) return;
+  mountScreen(key);
+  view.innerHTML = `<section class="center-stage"><p class="eyebrow">practice ${count + 1} of 2</p><h2>practice complete</h2><p class="subtle">loading the next step…</p></section>`;
 }
 
 function renderLobby(): void {
@@ -399,6 +465,10 @@ function renderTypingView(
       mySide,
       preferences,
       onDeadline: spectator ? () => undefined : finishCurrent,
+      onRestart:
+        !spectator && identity.startsWith("practice-")
+          ? restartPractice
+          : undefined,
     });
     if (typing && !spectator) renderer.attachSession(typing);
     renderer.setMenuOpen(commandMenu.isOpen);
@@ -419,8 +489,13 @@ function finishCurrent(): void {
     const result = typing.stats();
     if (result.correctChars > 0) send({ type: "finish", result });
   } else if (screenKey.startsWith("practice-")) {
-    finishSent = false;
+    finishSent = true;
+    const completedPractice = mySide
+      ? (snapshot.stations[mySide]?.practiceCount ?? 0)
+      : 0;
+    practiceCompletionCount = completedPractice;
     typing = undefined;
+    mountPracticeCompleting(completedPractice);
     send({ type: "practiceComplete" });
   }
 }
@@ -716,7 +791,7 @@ function commandInventory(): Command[] {
         {
           id: "spectate",
           name: "leaderboard / spectate",
-          disabled: activeRace && route === "station",
+          disabled: mySide !== undefined || (activeRace && route === "station"),
           action: () => navigate("spectator"),
         },
         {
@@ -756,8 +831,15 @@ function navigate(next: "station" | "spectator"): void {
   }
   if (
     next === "spectator" &&
-    !canNavigateToSpectator(snapshot.phase, route === "spectator")
+    !canNavigateToSpectator(
+      snapshot.phase,
+      route === "spectator",
+      mySide !== undefined,
+    )
   ) {
+    if (mySide !== undefined) {
+      showToast("Finish or leave this station before opening the leaderboard.");
+    }
     return;
   }
   route = next;
@@ -769,6 +851,15 @@ function navigate(next: "station" | "spectator"): void {
   });
   screenKey = "";
   render();
+}
+
+function updateSpectateButton(): void {
+  const button = mustElement<HTMLButtonElement>(document, "#spectateButton");
+  const locked = mySide !== undefined && route === "station";
+  button.disabled = locked;
+  button.title = locked
+    ? "Leaderboard is locked while this station is registered"
+    : "Spectate and leaderboard";
 }
 
 window.addEventListener("keydown", (event) => {
@@ -900,7 +991,7 @@ window.addEventListener("hashchange", () => {
   if (
     requested === "spectator" &&
     route === "station" &&
-    isActiveCompetition(snapshot.phase)
+    (mySide !== undefined || isActiveCompetition(snapshot.phase))
   ) {
     history.replaceState(null, "", "#/");
     return;

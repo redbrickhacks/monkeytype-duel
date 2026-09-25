@@ -11,6 +11,7 @@ export function canLeaveStation(phase: RoomPhase): boolean {
 export function canNavigateToSpectator(
   phase: RoomPhase,
   currentlySpectating: boolean,
+  hasStation = false,
 ): boolean {
-  return currentlySpectating || !isActiveCompetition(phase);
+  return currentlySpectating || (!hasStation && !isActiveCompetition(phase));
 }

@@ -13,6 +13,7 @@ type RendererOptions = {
   mySide?: Side;
   preferences: Preferences;
   onDeadline: () => void;
+  onRestart?: () => void;
 };
 
 const sides: readonly Side[] = ["L", "R"];
@@ -37,7 +38,6 @@ export class TypingRenderer {
   private endAt: number;
   private session: TypingSession | undefined;
   private frame = 0;
-  private idleTimer = 0;
   private scrollOffset = 0;
   private readonly lastCaretTops = new Map<Side | "local", number>();
   private menuOpen = false;
@@ -62,6 +62,9 @@ export class TypingRenderer {
         <div class="focus-warning" aria-hidden="true">click to focus</div>
       </div>
       <div class="live-stats" aria-label="Live duel statistics"></div>
+      <!-- Adapted from Monkeytype's #restartTestButton. Its native position
+           after the test preserves the original Tab + Enter interaction. -->
+      ${options.onRestart === undefined ? "" : '<button class="test-restart" type="button" aria-label="Restart Test"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></button>'}
     </section>`;
     this.test = mustElement(this.root, ".test");
     this.test.classList.toggle(
@@ -77,6 +80,10 @@ export class TypingRenderer {
     this.mountCarets();
     this.mountStats();
     this.applyPreferences(options.preferences);
+
+    this.root
+      .querySelector<HTMLButtonElement>(".test-restart")
+      ?.addEventListener("click", () => options.onRestart?.());
 
     this.test.addEventListener("pointerdown", () => this.focus());
     this.test.addEventListener("focus", () => this.updateFocusState());
@@ -96,7 +103,6 @@ export class TypingRenderer {
 
   updateTyping(stats: TypingStats): void {
     const typed = this.session?.typed ?? [];
-    const changed = typed.length !== this.previousTypedLength;
     const from = Math.min(this.previousTypedLength, typed.length);
     const to = Math.max(this.previousTypedLength, typed.length);
     for (let index = from; index <= to; index++) {
@@ -114,9 +120,6 @@ export class TypingRenderer {
     this.previousTypedLength = typed.length;
     this.ownWpm.textContent = `${Math.round(stats.wpm)} wpm`;
     this.ownWpm.hidden = !this.preferences.showLiveInfo || this.spectator;
-    if (changed) {
-      this.markTyping();
-    }
     this.moveCaret("local", stats.cursorIndex);
   }
 
@@ -192,7 +195,6 @@ export class TypingRenderer {
 
   dispose(): void {
     cancelAnimationFrame(this.frame);
-    window.clearTimeout(this.idleTimer);
     window.removeEventListener("resize", this.onResize);
   }
 
@@ -283,15 +285,6 @@ export class TypingRenderer {
       this.frame = requestAnimationFrame(tick);
     };
     tick();
-  }
-
-  private markTyping(): void {
-    this.test.classList.add("is-typing");
-    window.clearTimeout(this.idleTimer);
-    this.idleTimer = window.setTimeout(
-      () => this.test.classList.remove("is-typing"),
-      650,
-    );
   }
 
   private moveCaret(owner: Side | "local", index: number, snap = false): void {

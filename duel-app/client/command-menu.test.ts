@@ -58,4 +58,9 @@ describe("competition actions", () => {
     expect(canNavigateToSpectator("results", false)).toBe(true);
     expect(canNavigateToSpectator("racing", true)).toBe(true);
   });
+
+  it("locks a registered station to its station flow", () => {
+    expect(canNavigateToSpectator("registration", false, true)).toBe(false);
+    expect(canNavigateToSpectator("lobby", false, true)).toBe(false);
+  });
 });
