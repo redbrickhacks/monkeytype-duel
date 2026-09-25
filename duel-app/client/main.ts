@@ -196,14 +196,24 @@ function renderWithLeaderboardTransition(
   previousPhase: RoomSnapshot["phase"],
 ): void {
   const documentWithTransitions = document as Document & {
-    startViewTransition?: (update: () => void) => void;
+    startViewTransition?: (update: () => void) => {
+      finished: Promise<void>;
+    };
   };
   if (
     previousPhase !== "results" &&
     snapshot.phase === "results" &&
+    document.visibilityState === "visible" &&
     typeof documentWithTransitions.startViewTransition === "function"
   ) {
-    documentWithTransitions.startViewTransition(() => render());
+    try {
+      const transition = documentWithTransitions.startViewTransition(() =>
+        render(),
+      );
+      void transition.finished.catch(() => undefined);
+    } catch {
+      render();
+    }
   } else {
     render();
   }
