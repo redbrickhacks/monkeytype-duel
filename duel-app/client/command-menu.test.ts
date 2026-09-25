@@ -25,6 +25,23 @@ describe("command search", () => {
       "caret",
     ]);
   });
+
+  it("uses Monkeytype's word-prefix matching and multi-word ranking", () => {
+    expect(filterCommands(commands, "th dr").map((item) => item.name)).toEqual([
+      "theme › Dracula",
+    ]);
+    expect(filterCommands(commands, "car st").map((item) => item.id)).toEqual([
+      "caret",
+    ]);
+    expect(filterCommands(commands, "rac")).toEqual([]);
+  });
+
+  it("keeps the grouped command list until the user searches", () => {
+    expect(filterCommands(commands, "").map((item) => item.id)).toEqual([
+      "theme",
+      "caret",
+    ]);
+  });
 });
 
 describe("competition actions", () => {

@@ -551,9 +551,26 @@ const choiceCommands = <K extends keyof Preferences>(
   values.map((value) => ({
     id: `${String(key)}-${String(value)}`,
     name: label(value),
-    hint: preferences[key] === value ? "✓" : "",
+    active: () => preferences[key] === value,
     action: () => setPreferences({ [key]: value } as Partial<Preferences>),
   }));
+
+function themeCommands(): Command[] {
+  return Object.entries(themes).map(([name, theme]) => ({
+    id: `theme-${name}`,
+    name: theme.label,
+    active: () => preferences.theme === name,
+    theme: {
+      bg: theme.bg,
+      main: theme.main,
+      sub: theme.sub,
+      text: theme.text,
+    },
+    hover: () => applyPreferences({ ...preferences, theme: name }),
+    unhover: () => applyPreferences(preferences),
+    action: () => setPreferences({ theme: name }),
+  }));
+}
 
 function preferenceToggle(
   key: keyof Pick<
@@ -572,10 +589,7 @@ function commandInventory(): Command[] {
       id: "theme",
       name: "theme",
       aliases: ["serika dracula nord terminal light"],
-      children: () =>
-        choiceCommands("theme", Object.keys(themes), (value) =>
-          themeLabel(value),
-        ),
+      children: themeCommands,
     },
     {
       id: "font",

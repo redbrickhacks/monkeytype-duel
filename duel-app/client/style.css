@@ -640,52 +640,82 @@ label {
   }
 }
 
-#commandMenu {
-  display: none;
+#commandLine {
+  display: flex;
   position: fixed;
   inset: 0;
   z-index: 1000;
+  visibility: hidden;
+  opacity: 0;
   background: #0009;
-  padding: 6rem 1rem 1rem;
+  padding: 6rem 2rem;
   align-items: flex-start;
   justify-content: center;
+  transition:
+    opacity 0.125s,
+    visibility 0.125s,
+    background 0.125s;
 }
-#commandMenu.open {
-  display: flex;
+#commandLine.open {
+  visibility: visible;
+  opacity: 1;
 }
-.command-panel {
+#commandLine .modal {
   width: min(100%, 600px);
-  max-height: min(70vh, 560px);
   overflow: hidden;
   border-radius: var(--radius);
   background: var(--bg);
-  box-shadow: 0 0.5rem 2rem #0005;
+  box-shadow: 0 0 0 0.2em transparent;
+  transform: translateY(-0.5rem);
+  transition:
+    transform 0.125s,
+    box-shadow 0.125s;
 }
-.command-search-row {
+#commandLine.open .modal {
+  transform: none;
+}
+#commandLine.noBackground {
+  background: transparent;
+}
+#commandLine.noBackground .modal {
+  box-shadow: 0 0 0 0.2em var(--sub-alt);
+}
+.command-input-row {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.75rem;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  padding: 0.9rem 1rem;
-  color: var(--main);
-  border-bottom: 1px solid color-mix(in srgb, var(--sub) 25%, transparent);
 }
-.command-search {
+#commandLine .searchicon {
+  grid-column: 1 / 2;
+  grid-row: 1 / 2;
+  margin: 1px 1rem 0;
+  color: var(--sub);
+}
+#commandLine .searchicon svg,
+#commandLine .command .icon svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+#commandLine input {
+  width: 100%;
   min-width: 0;
+  padding: 1rem 1rem 1rem 0;
   border: 0;
   outline: 0;
   color: var(--text);
-  background: transparent;
+  background: var(--bg);
   font-size: 1rem;
+  font-family: inherit;
+  border-radius: var(--radius);
 }
-input.command-search:focus-visible {
+#commandLine input:focus-visible {
   outline: none;
 }
-.command-search-row svg {
-  width: 1rem;
-  height: 1rem;
-}
-kbd,
 footer > span {
   padding: 0.15rem 0.4rem;
   border-radius: 0.25rem;
@@ -694,45 +724,62 @@ footer > span {
   font: inherit;
   font-size: 0.68rem;
 }
-.command-breadcrumb {
-  padding: 0.55rem 1rem;
-  color: var(--sub);
-  font-size: 0.7rem;
-}
-.command-breadcrumb[role="button"] {
+#commandLine .suggestions {
+  display: grid;
+  max-height: calc(100vh - 15rem);
+  overflow-y: auto;
   cursor: pointer;
+  user-select: none;
 }
-.command-options {
-  max-height: calc(min(70vh, 560px) - 6rem);
-  overflow: auto;
-  padding: 0.35rem;
-}
-.command-option {
-  width: 100%;
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
+#commandLine .command {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0;
   padding: 0.5rem 1rem;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
+  color: var(--sub);
   font-size: 0.75rem;
   line-height: 0.75rem;
 }
-.command-option small {
-  color: var(--sub);
+#commandLine .command .icon {
+  display: grid;
+  width: 1rem;
+  min-height: 1rem;
+  margin-right: 0.5rem;
+  place-items: center;
 }
-.command-option.active {
-  background: var(--text);
-  color: var(--bg);
+#commandLine .command-display {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.command-option.active small {
+#commandLine .command small {
+  margin-left: 1rem;
   color: inherit;
 }
-.command-option:disabled {
+#commandLine .command.active {
+  background: var(--text);
+  color: var(--bg) !important;
+}
+#commandLine .command[aria-disabled="true"] {
   opacity: 0.35;
   cursor: not-allowed;
+}
+#commandLine .changeThemeCommand {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+#commandLine .themeBubbles {
+  display: grid;
+  grid-auto-flow: column;
+  gap: 0.5em;
+  margin-left: 1rem;
+  border-radius: 1em;
+  outline: 0.25rem solid;
+}
+#commandLine .themeBubble {
+  width: 1em;
+  height: 1em;
+  border-radius: 100%;
 }
 .command-empty {
   padding: 2rem;
