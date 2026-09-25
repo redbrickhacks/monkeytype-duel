@@ -27,6 +27,7 @@ const room = new DuelRoom(
   database,
   words,
   Number(process.env.RACE_DURATION_SECONDS ?? 30),
+  Number(process.env.PRACTICE_DURATION_SECONDS ?? 30),
 );
 const app = express();
 app.disable("x-powered-by");

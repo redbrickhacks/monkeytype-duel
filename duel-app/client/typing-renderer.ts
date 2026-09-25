@@ -69,7 +69,7 @@ export class TypingRenderer {
       <div class="live-stats" aria-label="Live duel statistics"></div>
       <!-- Adapted from Monkeytype's #restartTestButton. Its native position
            after the test preserves the original Tab + Enter interaction. -->
-      ${options.onRestart === undefined ? "" : '<div class="test-actions"><button class="test-restart" type="button" aria-label="Restart Test"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></button><button class="test-skip" type="button">skip to next round</button><button class="test-logout" type="button">logout</button></div>'}
+      ${options.onRestart === undefined ? "" : '<div class="test-actions"><button class="test-restart" type="button" aria-label="Reset text; timer keeps running"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></button><button class="test-skip" type="button">skip this practice</button><button class="test-logout" type="button">logout</button></div>'}
     </section>`;
     this.test = mustElement(this.root, ".test");
     this.test.classList.toggle(

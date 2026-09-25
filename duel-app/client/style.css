@@ -192,6 +192,52 @@ h3 {
 .hint {
   font-size: 0.75rem;
 }
+.event-briefing {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.8fr) minmax(20rem, 1.4fr);
+  gap: 1rem 2rem;
+  width: min(100%, 720px);
+  margin: 2rem auto 0;
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  background: var(--sub-alt);
+  text-align: left;
+}
+.event-briefing h3 {
+  margin: 0;
+  color: var(--text);
+}
+.event-briefing ol {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding-left: 1.35rem;
+}
+.event-briefing li {
+  padding-left: 0.35rem;
+}
+.event-briefing li::marker {
+  color: var(--main);
+}
+.event-briefing li b,
+.event-briefing li span {
+  display: block;
+}
+.event-briefing li span,
+.event-briefing > p {
+  color: var(--sub);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.event-briefing > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid color-mix(in srgb, var(--sub) 25%, transparent);
+}
+.event-briefing > p b {
+  color: var(--text);
+}
 .side-picker {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -587,6 +633,10 @@ label {
   font-size: 10rem;
   color: var(--main);
   font-weight: 400;
+}
+.countdown small {
+  display: block;
+  color: var(--sub);
 }
 .test {
   width: min(100%, 1000px);
@@ -1165,6 +1215,9 @@ footer span {
   color: white;
 }
 @media (max-width: 650px) {
+  .event-briefing {
+    grid-template-columns: 1fr;
+  }
   .live-duel-grid {
     grid-template-columns: 1fr;
   }

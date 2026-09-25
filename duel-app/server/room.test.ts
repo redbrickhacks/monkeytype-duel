@@ -133,7 +133,7 @@ describe("DuelRoom", () => {
     expect(room.snapshot().stations.L?.profile.login).toBe("left");
   });
 
-  it("only times out an active practice and resets on activity", () => {
+  it("resets AFK on activity and ends practice at its fixed deadline", () => {
     const database = {
       saveProfile: vi.fn(),
       leaderboard: vi.fn(() => []),
@@ -160,7 +160,27 @@ describe("DuelRoom", () => {
     vi.advanceTimersByTime(19_500);
     expect(room.snapshot().stations.L).toBeDefined();
     vi.advanceTimersByTime(500);
-    expect(room.snapshot().stations.L).toBeUndefined();
+    expect(room.snapshot().stations.L).toBeDefined();
+    expect(room.snapshot().stations.L?.practiceCount).toBe(1);
+    expect(room.snapshot().stations.L?.practiceEndsAt).toBeUndefined();
+  });
+
+  it("does not extend a practice deadline when practice is restarted", () => {
+    const database = {
+      saveProfile: vi.fn(),
+      leaderboard: vi.fn(() => []),
+      saveRace: vi.fn(),
+    };
+    const room = new DuelRoom(database as never, ["type"], 30, 5);
+    const client = room.addClient(new FakeSocket() as never);
+    reserveAndClaim(room, client, "L", left);
+    room.handle(client, { type: "practiceStart" });
+    expect(room.snapshot().stations.L?.practiceEndsAt).toBe(1_005_000);
+    vi.advanceTimersByTime(2_000);
+    room.handle(client, { type: "practiceStart" });
+    expect(room.snapshot().stations.L?.practiceEndsAt).toBe(1_005_000);
+    vi.advanceTimersByTime(3_000);
+    expect(room.snapshot().stations.L?.practiceCount).toBe(1);
   });
 
   it("does not run the AFK timer between practices or in the lobby", () => {

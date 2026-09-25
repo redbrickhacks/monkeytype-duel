@@ -4,7 +4,6 @@ import "./style.css";
 import type {
   ClientMessage,
   LeaderboardEntry,
-  PublicProfile,
   RoomSnapshot,
   ServerMessage,
   Side,
@@ -54,6 +53,7 @@ let stationToken: string | undefined;
 let mySide: Side | undefined;
 let reservedSide: Side | undefined;
 let pendingSide: Side | undefined;
+let registrationSubmitting = false;
 let route: "station" | "spectator" =
   location.hash === "#/spectate" ? "spectator" : "station";
 let typing: TypingSession | undefined;
@@ -62,6 +62,7 @@ let practiceEndAt = 0;
 let practiceAutoStartAt = 0;
 let practiceCountdownFor = -1;
 let practiceCompletionCount = -1;
+let practiceRevision = 0;
 let finishSent = false;
 let progressSequence = 0;
 let frame = 0;
@@ -118,12 +119,15 @@ function connect(): void {
       snapshot = message.snapshot;
       commandMenu.refresh();
       syncSide();
+      syncReservation();
+      syncPracticeDeadline();
       renderWithLeaderboardTransition(previousPhase);
     } else if (message.type === "claimed") {
       stationToken = message.stationToken;
       mySide = message.side;
       reservedSide = undefined;
       pendingSide = undefined;
+      registrationSubmitting = false;
       finishSent = false;
       practiceCompletionCount = -1;
       render();
@@ -132,11 +136,19 @@ function connect(): void {
       if (message.granted) {
         reservedSide = message.side;
       } else {
+        registrationSubmitting = false;
         if (reservedSide === message.side) reservedSide = undefined;
         showToast(message.message ?? "That side is no longer available.", true);
       }
       render();
+      if (message.granted) {
+        requestAnimationFrame(() =>
+          view.querySelector<HTMLInputElement>("#githubLogin")?.focus(),
+        );
+      }
     } else if (message.type === "error") {
+      registrationSubmitting = false;
+      if (screenKey === "registration") renderRegistration();
       showToast(message.message, true);
     } else if (message.type === "control" && message.action === "refresh") {
       location.reload();
@@ -244,6 +256,25 @@ function syncSide(): void {
   }
 }
 
+function syncPracticeDeadline(): void {
+  const station = mySide ? snapshot.stations[mySide] : undefined;
+  if (station?.practiceEndsAt !== undefined) {
+    practiceEndAt = station.practiceEndsAt - offset;
+  }
+}
+
+function syncReservation(): void {
+  if (
+    mySide === undefined &&
+    reservedSide !== undefined &&
+    pendingSide === undefined &&
+    snapshot.reservations[reservedSide] === undefined
+  ) {
+    reservedSide = undefined;
+    registrationSubmitting = false;
+  }
+}
+
 function render(): void {
   cancelAnimationFrame(frame);
   updateSpectateButton();
@@ -308,21 +339,25 @@ function renderRegistration(): void {
                   : "right";
         }
       });
-    const enabled = reservedSide !== undefined;
+    const enabled = reservedSide !== undefined && !registrationSubmitting;
     const input = view.querySelector<HTMLInputElement>("#githubLogin");
     const submit = view.querySelector<HTMLButtonElement>(
       "#githubForm button[type=submit]",
     );
     if (input) input.disabled = !enabled;
-    if (submit) submit.disabled = !enabled;
+    if (submit) {
+      submit.disabled = !enabled;
+      submit.textContent = registrationSubmitting ? "loading…" : "continue";
+    }
     return;
   }
   mountScreen("registration");
   view.innerHTML = `<section class="center-stage registration">
     <p class="eyebrow">event station</p><h2>choose your side</h2>
     <div class="side-picker"><button data-side="L" class="side">L<small>left</small></button><div class="versus">vs</div><button data-side="R" class="side">R<small>right</small></button></div>
-    <form id="githubForm"><label for="githubLogin">GitHub username</label><div class="profile-input"><span>@</span><input id="githubLogin" autocomplete="off" spellcheck="false" placeholder="select a side first" required disabled><button type="submit" disabled>find profile</button></div></form>
-    <div id="profilePreview"></div><p class="hint">Public profile lookup only — no GitHub sign-in.</p>
+    <form id="githubForm"><label for="githubLogin">GitHub username</label><div class="profile-input"><span>@</span><input id="githubLogin" autocomplete="off" spellcheck="false" placeholder="select a side first" required disabled><button type="submit" disabled>continue</button></div></form>
+    <p class="hint">Press Enter to continue. Public profile lookup only — no GitHub sign-in.</p>
+    ${eventBriefing()}
   </section>`;
   view.querySelectorAll<HTMLButtonElement>("[data-side]").forEach(
     (button) =>
@@ -336,9 +371,7 @@ function renderRegistration(): void {
         send({ type: "reserveSide", side, selectedAt: Date.now() });
       }),
   );
-  mustElement<HTMLFormElement>(view, "#githubForm").onsubmit = async (
-    event,
-  ) => {
+  mustElement<HTMLFormElement>(view, "#githubForm").onsubmit = (event) => {
     event.preventDefault();
     const side = reservedSide;
     if (side === undefined) {
@@ -346,27 +379,13 @@ function renderRegistration(): void {
       return;
     }
     const input = mustElement<HTMLInputElement>(view, "#githubLogin");
+    const githubLogin = input.value.trim();
+    if (githubLogin === "") return;
+    registrationSubmitting = true;
     input.disabled = true;
-    try {
-      const response = await fetch(
-        `${apiUrl}/api/profile/${encodeURIComponent(input.value.trim())}`,
-      );
-      const data = (await response.json()) as PublicProfile & {
-        error?: string;
-      };
-      if (!response.ok) throw new Error(data.error ?? "Profile lookup failed.");
-      mustElement<HTMLElement>(view, "#profilePreview").innerHTML =
-        `<div class="profile-card"><img src="${escapeHtml(data.avatarUrl)}" alt=""><div><strong>${escapeHtml(data.displayName)}</strong><span>@${escapeHtml(data.login)}</span></div><button id="confirmProfile">use this profile</button></div>`;
-      mustElement<HTMLButtonElement>(view, "#confirmProfile").onclick = () =>
-        send({ type: "claim", side, githubLogin: data.login });
-    } catch (error) {
-      showToast(
-        error instanceof Error ? error.message : "Profile lookup failed.",
-        true,
-      );
-    } finally {
-      input.disabled = false;
-    }
+    mustElement<HTMLButtonElement>(view, "#githubForm button").textContent =
+      "loading…";
+    send({ type: "claim", side, githubLogin });
   };
   renderRegistration();
 }
@@ -390,7 +409,7 @@ function renderPractice(count: number): void {
     mountScreen(key);
     practiceCountdownFor = count;
     practiceAutoStartAt = Date.now() + 5_000;
-    view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide}</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private 30 second warm-up. Your opponent cannot see this result.</p><p class="practice-auto">starting in <strong id="practiceAutoCountdown">5</strong></p><button class="primary" id="startPractice">start now</button><button class="text-action" id="skipPractice">skip to next round</button><button class="text-action" id="logoutStation">logout</button></section>`;
+    view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide} · stage ${count + 1} of 3</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private ${practiceSeconds} second warm-up. Restart clears the text, but the clock keeps running.</p><p class="practice-auto">starting automatically in <strong id="practiceAutoCountdown">5</strong></p><button class="primary" id="startPractice">start now</button><button class="text-action" id="skipPractice">skip this practice</button><button class="text-action" id="logoutStation">logout</button></section>`;
     mustElement<HTMLButtonElement>(view, "#startPractice").onclick = () =>
       startPractice(count);
     mustElement<HTMLButtonElement>(view, "#skipPractice").onclick = () =>
@@ -425,6 +444,7 @@ function startPractice(count: number): void {
   practiceText = makePracticeText();
   const startedAt = Date.now();
   practiceEndAt = startedAt + practiceSeconds * 1_000;
+  practiceRevision++;
   typing = new TypingSession(practiceText, startedAt);
   finishSent = false;
   lastActivitySentAt = startedAt;
@@ -434,10 +454,27 @@ function startPractice(count: number): void {
 
 function restartPractice(): void {
   const me = mySide ? snapshot.stations[mySide] : undefined;
-  if (me === undefined || me.practiceCount >= 2) return;
-  typing = undefined;
-  practiceCountdownFor = me.practiceCount;
-  startPractice(me.practiceCount);
+  if (
+    me === undefined ||
+    me.practiceCount >= 2 ||
+    typing === undefined ||
+    practiceEndAt <= Date.now()
+  ) {
+    return;
+  }
+  practiceText = makePracticeText();
+  practiceRevision++;
+  typing = new TypingSession(practiceText, Date.now());
+  finishSent = false;
+  send({ type: "practiceStart" });
+  renderTypingView(
+    `practice ${me.practiceCount + 1} of 2`,
+    practiceEndAt,
+    undefined,
+    false,
+    `practice-${practiceRevision}`,
+  );
+  showToast("Text reset. The practice timer keeps running.");
 }
 
 function skipPractice(): void {
@@ -465,8 +502,13 @@ function mountPracticeCompleting(count: number): void {
 function renderLobby(): void {
   const opponentSide: Side = mySide === "L" ? "R" : "L";
   const opponent = snapshot.stations[opponentSide];
+  const opponentStatus = !opponent
+    ? "waiting for opponent"
+    : opponent.practiceCount >= 2
+      ? "opponent ready"
+      : `opponent is on practice ${opponent.practiceCount + 1} of 2`;
   mountScreen("lobby");
-  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found — waiting for practice" : "waiting for opponent"}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<p class="subtle">The final starts automatically with a 10 second countdown when both players finish practice.</p><div class="lobby-actions"><button class="text-action" id="logoutStation">logout</button></div>${leaderboardMarkup()}</section>`;
+  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">stage 3 of 3 · final</p><h2>${opponentStatus}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<p class="subtle">You are ready. The final starts automatically with a 10 second countdown when both players finish practice.</p><div class="lobby-actions"><button class="text-action" id="logoutStation">logout</button></div>${leaderboardMarkup()}</section>`;
   mustElement<HTMLButtonElement>(view, "#logoutStation").onclick = logout;
 }
 
@@ -480,7 +522,7 @@ function renderRace(spectator: boolean): void {
   if (snapshot.phase === "countdown" || now < race.startAt) {
     const remaining = Math.max(1, Math.ceil((race.startAt - now) / 1000));
     mountScreen(`countdown-${race.id}`);
-    view.innerHTML = `<section class="countdown"><p>get ready</p><strong>${remaining}</strong></section>`;
+    view.innerHTML = `<section class="countdown"><p>final starts in</p><strong>${remaining}</strong><small>one attempt · restart disabled</small></section>`;
     frame = requestAnimationFrame(() => renderRace(spectator));
     return;
   }
@@ -504,7 +546,7 @@ function renderTypingView(
   endAt: number,
   textOverride?: string,
   spectator = false,
-  identity = `practice-${practiceEndAt}`,
+  identity = `practice-${practiceRevision}`,
 ): void {
   const text = textOverride ?? typing?.text ?? practiceText;
   if (renderer?.identity !== identity) {
@@ -717,6 +759,18 @@ function waitingMonkey(): string {
   return `<div class="waiting-monkey" aria-label="Animated monkey typing while waiting"><div class="monkey-head"><i></i><i></i><span></span></div><div class="monkey-hands"><b></b><b></b></div><div class="monkey-keyboard"><span></span><span></span><span></span><span></span><span></span></div><p>warming up the keys…</p></div>`;
 }
 
+function eventBriefing(): string {
+  return `<section class="event-briefing" aria-labelledby="eventBriefingTitle">
+    <div><p class="eyebrow">quick briefing</p><h3 id="eventBriefingTitle">three stages, one final attempt</h3></div>
+    <ol>
+      <li><b>practice 1</b><span>${practiceSeconds}s · private · optional</span></li>
+      <li><b>practice 2</b><span>${practiceSeconds}s · private · optional</span></li>
+      <li><b>final duel</b><span>automatic 10s countdown · no restart</span></li>
+    </ol>
+    <p><b>Scoring:</b> error-adjusted WPM sets your rank. Raw WPM and accuracy are shown too. Refresh logs you out; the final cannot be retried.</p>
+  </section>`;
+}
+
 function makePracticeText(): string {
   const bank =
     "the of to and a in is it you that for on are with this from have be at one word type quick light world find new work part place made live where after back only round good every think help line turn same move right want air play small end home read hand large add land here must high follow change light kind need build head stand page found school learn cover food sun between state keep never last city tree start story".split(
@@ -881,7 +935,7 @@ function commandInventory(): Command[] {
       children: () => [
         {
           id: "skip-practice",
-          name: "skip to next round",
+          name: "skip this practice",
           disabled:
             !me ||
             me.practiceCount >= 2 ||
@@ -920,7 +974,7 @@ function commandInventory(): Command[] {
       aliases: ["help shortcuts locked"],
       action: () =>
         showToast(
-          "Fixed text and timer. Escape opens settings; restart is available only during practice.",
+          "Two private practices, then one automatic final. Adjusted WPM ranks; raw WPM and accuracy are also shown. Practice reset never resets the clock.",
         ),
     },
     {

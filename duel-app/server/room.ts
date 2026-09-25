@@ -32,6 +32,7 @@ type Station = {
   lastActivityAt: number;
   afkWarned: boolean;
   practiceActive: boolean;
+  practiceEndsAt?: number;
 } & StationState;
 
 const AFK_WARNING_MS = 10_000;
@@ -58,6 +59,7 @@ export class DuelRoom {
     private readonly database: DuelDatabase,
     private readonly words: string[],
     private readonly durationSeconds = 30,
+    private readonly practiceDurationSeconds = 30,
   ) {
     this.housekeepingTimer = setInterval(() => this.checkAfk(), 500);
     this.housekeepingTimer.unref();
@@ -218,7 +220,11 @@ export class DuelRoom {
         ) {
           return;
         }
-        station.practiceActive = true;
+        if (!station.practiceActive) {
+          station.practiceActive = true;
+          station.practiceEndsAt =
+            Date.now() + this.practiceDurationSeconds * 1_000;
+        }
         this.touch(station);
         break;
       case "practiceComplete":
@@ -355,6 +361,9 @@ export class DuelRoom {
         wpm: station.wpm,
         rawWpm: station.rawWpm,
         accuracy: station.accuracy,
+        ...(station.practiceEndsAt !== undefined
+          ? { practiceEndsAt: station.practiceEndsAt }
+          : {}),
         ...(station.practiceActive
           ? {
               afkWarningAt: station.lastActivityAt + AFK_WARNING_MS,
@@ -499,6 +508,7 @@ export class DuelRoom {
 
   private advancePractice(station: Station): void {
     station.practiceActive = false;
+    station.practiceEndsAt = undefined;
     station.afkWarned = false;
     station.practiceCount = Math.min(2, station.practiceCount + 1);
     if ([...this.stations.values()].some((item) => item.practiceCount >= 2)) {
@@ -526,6 +536,14 @@ export class DuelRoom {
     if (reservationsChanged) this.broadcast();
     for (const [side, station] of this.stations) {
       if (!station.practiceActive) continue;
+      if (
+        station.practiceEndsAt !== undefined &&
+        now >= station.practiceEndsAt
+      ) {
+        logEvent("info", side, "practice time elapsed");
+        this.advancePractice(station);
+        continue;
+      }
       if (now >= station.lastActivityAt + AFK_RESET_MS) {
         logEvent("warn", side, "station reset after 20 seconds of inactivity");
         this.forceReset(side, "AFK timeout");

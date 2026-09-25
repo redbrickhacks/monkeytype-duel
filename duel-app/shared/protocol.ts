@@ -23,6 +23,7 @@ export type StationState = {
   wpm: number;
   rawWpm: number;
   accuracy: number;
+  practiceEndsAt?: number;
   afkWarningAt?: number;
   afkResetAt?: number;
 };
