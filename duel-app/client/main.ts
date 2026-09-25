@@ -154,7 +154,8 @@ function reportActivity(force = false): void {
   if (
     mySide === undefined ||
     stationToken === undefined ||
-    stationToken === ""
+    stationToken === "" ||
+    !isPracticeSessionActive()
   ) {
     return;
   }
@@ -167,6 +168,14 @@ function reportActivity(force = false): void {
     document.documentElement.classList.remove("afk-active");
   }
   send({ type: "activity" });
+}
+
+function isPracticeSessionActive(): boolean {
+  return (
+    screenKey.startsWith("practice-") &&
+    typing !== undefined &&
+    practiceEndAt > Date.now()
+  );
 }
 
 function renderWithLeaderboardTransition(
@@ -321,6 +330,8 @@ function renderPractice(count: number): void {
     practiceText = makePracticeText();
     practiceEndAt = Date.now() + practiceSeconds * 1_000;
     typing = new TypingSession(practiceText, Date.now());
+    lastActivitySentAt = Date.now();
+    send({ type: "practiceStart" });
     renderTypingView(`practice ${count + 1} of 2`, practiceEndAt, undefined);
   };
   mustElement<HTMLButtonElement>(view, "#releaseStation").onclick = () =>
@@ -761,12 +772,7 @@ function navigate(next: "station" | "spectator"): void {
 }
 
 window.addEventListener("keydown", (event) => {
-  if (afkActive) {
-    event.preventDefault();
-    reportActivity(true);
-    return;
-  }
-  reportActivity();
+  reportActivity(afkActive);
   if (
     (event.ctrlKey || event.metaKey) &&
     event.shiftKey &&
@@ -834,6 +840,9 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("pointerdown", () => reportActivity(true), {
+  capture: true,
+});
+window.addEventListener("pointermove", () => reportActivity(), {
   capture: true,
 });
 document.addEventListener("visibilitychange", () => {

@@ -25,6 +25,7 @@ export function parseClientMessage(value: unknown): ClientMessage {
         throw new Error("Invalid station claim.");
       }
       return value as ClientMessage;
+    case "practiceStart":
     case "practiceComplete":
     case "release":
     case "rematch":

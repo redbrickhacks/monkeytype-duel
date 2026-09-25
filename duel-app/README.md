@@ -32,9 +32,11 @@ on ports 80/443. Caddy obtains and renews the TLS certificate automatically.
 
 Runtime state is stored in one SQLite file configured by `DATABASE_PATH`. The server is deliberately single-instance; restarting during a race aborts that in-memory race while preserving completed results.
 
-Stations show an AFK warning after 10 seconds without interaction and are
-released at 20 seconds. Results remain visible for 15 seconds before both
-stations reset. Race countdown and active typing are excluded from AFK expiry.
+During each practice run, stations show an AFK warning after 10 seconds without
+mouse or keyboard interaction and are released at 20 seconds. Activity restores
+the full timeout. Practice-start screens, the waiting lobby, race countdown,
+active races, and results are excluded from AFK expiry. Results remain visible
+for 15 seconds before both stations reset.
 The dashboard retains the latest 500 backend/station events in memory; systemd
 remains the durable source for service logs.
 

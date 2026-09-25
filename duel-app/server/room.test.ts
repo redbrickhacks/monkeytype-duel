@@ -38,7 +38,8 @@ describe("DuelRoom", () => {
       saveRace: vi.fn(),
     };
     const room = new DuelRoom(database as never, ["type"]);
-    const client = room.addClient(new FakeSocket() as never);
+    const socket = new FakeSocket();
+    const client = room.addClient(socket as never);
     room.handle(client, { type: "hello", role: "spectator" });
     expect(room.clientStatus()).toContainEqual({
       source: "leaderboard",
@@ -60,7 +61,9 @@ describe("DuelRoom", () => {
     room.claim(lClient, "L", left);
     room.claim(rClient, "R", right);
     for (let i = 0; i < 2; i++) {
+      room.handle(lClient, { type: "practiceStart" });
       room.handle(lClient, { type: "practiceComplete" });
+      room.handle(rClient, { type: "practiceStart" });
       room.handle(rClient, { type: "practiceComplete" });
     }
     room.handle(lClient, { type: "ready", ready: true });
@@ -91,7 +94,37 @@ describe("DuelRoom", () => {
     ).toBe(true);
   });
 
-  it("warns an idle station and releases it after 20 seconds", () => {
+  it("only times out an active practice and resets on activity", () => {
+    const database = {
+      saveProfile: vi.fn(),
+      leaderboard: vi.fn(() => []),
+      saveRace: vi.fn(),
+    };
+    const room = new DuelRoom(database as never, ["type"]);
+    const socket = new FakeSocket();
+    const client = room.addClient(socket as never);
+    room.claim(client, "L", left);
+
+    expect(room.snapshot().stations.L?.afkWarningAt).toBeUndefined();
+    vi.advanceTimersByTime(30_000);
+    expect(room.snapshot().stations.L).toBeDefined();
+
+    room.handle(client, { type: "practiceStart" });
+    expect(room.snapshot().stations.L?.afkWarningAt).toBe(1_040_000);
+    expect(room.snapshot().stations.L?.afkResetAt).toBe(1_050_000);
+    vi.advanceTimersByTime(10_000);
+    const messagesBeforeActivity = socket.messages.length;
+    room.handle(client, { type: "activity" });
+    expect(socket.messages.length).toBeGreaterThan(messagesBeforeActivity);
+    expect(room.snapshot().stations.L?.afkWarningAt).toBe(1_050_000);
+    expect(room.snapshot().stations.L?.afkResetAt).toBe(1_060_000);
+    vi.advanceTimersByTime(19_500);
+    expect(room.snapshot().stations.L).toBeDefined();
+    vi.advanceTimersByTime(500);
+    expect(room.snapshot().stations.L).toBeUndefined();
+  });
+
+  it("does not run the AFK timer between practices or in the lobby", () => {
     const database = {
       saveProfile: vi.fn(),
       leaderboard: vi.fn(() => []),
@@ -100,13 +133,14 @@ describe("DuelRoom", () => {
     const room = new DuelRoom(database as never, ["type"]);
     const client = room.addClient(new FakeSocket() as never);
     room.claim(client, "L", left);
-
-    expect(room.snapshot().stations.L?.afkWarningAt).toBe(1_010_000);
-    expect(room.snapshot().stations.L?.afkResetAt).toBe(1_020_000);
-    vi.advanceTimersByTime(19_500);
-    expect(room.snapshot().stations.L).toBeDefined();
-    vi.advanceTimersByTime(500);
-    expect(room.snapshot().stations.L).toBeUndefined();
+    for (let i = 0; i < 2; i++) {
+      room.handle(client, { type: "practiceStart" });
+      room.handle(client, { type: "practiceComplete" });
+      expect(room.snapshot().stations.L?.afkResetAt).toBeUndefined();
+      vi.advanceTimersByTime(30_000);
+      expect(room.snapshot().stations.L).toBeDefined();
+    }
+    expect(room.snapshot().phase).toBe("lobby");
   });
 
   it("clears both stations 15 seconds after race results", () => {
@@ -121,7 +155,9 @@ describe("DuelRoom", () => {
     room.claim(lClient, "L", left);
     room.claim(rClient, "R", right);
     for (let i = 0; i < 2; i++) {
+      room.handle(lClient, { type: "practiceStart" });
       room.handle(lClient, { type: "practiceComplete" });
+      room.handle(rClient, { type: "practiceStart" });
       room.handle(rClient, { type: "practiceComplete" });
     }
     room.handle(lClient, { type: "ready", ready: true });

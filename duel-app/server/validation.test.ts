@@ -18,6 +18,9 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage({ type: "activity" })).toEqual({
       type: "activity",
     });
+    expect(parseClientMessage({ type: "practiceStart" })).toEqual({
+      type: "practiceStart",
+    });
     expect(
       parseClientMessage({
         type: "clientLog",

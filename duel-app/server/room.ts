@@ -25,6 +25,7 @@ type Station = {
   lastSequence: number;
   lastActivityAt: number;
   afkWarned: boolean;
+  practiceActive: boolean;
 } & StationState;
 
 const AFK_WARNING_MS = 10_000;
@@ -65,6 +66,8 @@ export class DuelRoom {
     if (station && station.token === client.token) {
       station.connected = false;
       station.socket = undefined;
+      station.practiceActive = false;
+      station.afkWarned = false;
       logEvent("warn", client.side, "station disconnected");
       this.broadcast();
     }
@@ -96,6 +99,7 @@ export class DuelRoom {
     client.token = token;
     station.connected = true;
     station.socket = client.socket;
+    station.practiceActive = false;
     this.touch(station);
     logEvent("info", side, "station session reattached");
     this.broadcast();
@@ -136,6 +140,7 @@ export class DuelRoom {
       lastSequence: -1,
       lastActivityAt: Date.now(),
       afkWarned: false,
+      practiceActive: false,
     };
     this.stations.set(side, station);
     client.role = "station";
@@ -166,12 +171,26 @@ export class DuelRoom {
       return;
     }
     if (message.type === "activity") {
-      this.touch(station);
+      if (station.practiceActive) this.touch(station);
       return;
     }
-    this.touch(station);
     switch (message.type) {
+      case "practiceStart":
+        if (
+          station.practiceCount >= 2 ||
+          this.phase === "countdown" ||
+          this.phase === "racing" ||
+          this.phase === "results"
+        ) {
+          return;
+        }
+        station.practiceActive = true;
+        this.touch(station);
+        break;
       case "practiceComplete":
+        if (!station.practiceActive) return;
+        station.practiceActive = false;
+        station.afkWarned = false;
         station.practiceCount = Math.min(2, station.practiceCount + 1);
         if (
           [...this.stations.values()].some((item) => item.practiceCount >= 2)
@@ -189,6 +208,7 @@ export class DuelRoom {
           return;
         }
         station.ready = message.ready;
+        station.practiceActive = false;
         this.phase = "lobby";
         this.broadcast();
         this.maybeStart();
@@ -303,7 +323,7 @@ export class DuelRoom {
         cursorIndex: station.cursorIndex,
         wpm: station.wpm,
         accuracy: station.accuracy,
-        ...(this.isAfkEligible()
+        ...(station.practiceActive
           ? {
               afkWarningAt: station.lastActivityAt + AFK_WARNING_MS,
               afkResetAt: station.lastActivityAt + AFK_RESET_MS,
@@ -329,6 +349,8 @@ export class DuelRoom {
       return;
     }
     for (const station of [left, right]) {
+      station.practiceActive = false;
+      station.afkWarned = false;
       station.ready = false;
       station.cursorIndex = 0;
       station.wpm = 0;
@@ -418,21 +440,16 @@ export class DuelRoom {
     );
   }
 
-  private isAfkEligible(): boolean {
-    return this.phase === "registration" || this.phase === "lobby";
-  }
-
   private touch(station: Station): void {
-    const wasWarned = station.afkWarned;
     station.lastActivityAt = Date.now();
     station.afkWarned = false;
-    if (wasWarned && this.isAfkEligible()) this.broadcast();
+    if (station.practiceActive) this.broadcast();
   }
 
   private checkAfk(): void {
-    if (!this.isAfkEligible()) return;
     const now = Date.now();
     for (const [side, station] of this.stations) {
+      if (!station.practiceActive) continue;
       if (now >= station.lastActivityAt + AFK_RESET_MS) {
         logEvent("warn", side, "station reset after 20 seconds of inactivity");
         this.forceReset(side, "AFK timeout");

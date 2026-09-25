@@ -66,6 +66,7 @@ export type RoomSnapshot = {
 export type ClientMessage =
   | { type: "hello"; role: "station" | "spectator"; stationToken?: string }
   | { type: "claim"; side: Side; githubLogin: string }
+  | { type: "practiceStart" }
   | { type: "practiceComplete" }
   | { type: "ready"; ready: boolean }
   | {
