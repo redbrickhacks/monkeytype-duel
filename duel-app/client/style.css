@@ -800,15 +800,20 @@ footer {
 .quiet-mode .test .test-label {
   opacity: 0.45;
 }
-.test-restart {
+.test-actions {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   margin: 1rem auto 0;
+}
+.test-actions button {
   padding: 1em 2em;
   color: var(--sub);
   background: transparent;
 }
-.test-restart:hover,
-.test-restart:focus-visible {
+.test-actions button:hover,
+.test-actions button:focus-visible {
   color: var(--text);
 }
 .test-restart svg {

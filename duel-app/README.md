@@ -37,6 +37,11 @@ mouse or keyboard interaction and are released at 20 seconds. Activity restores
 the full timeout. Practice-start screens, the waiting lobby, race countdown,
 active races, and results are excluded from AFK expiry. Results remain visible
 for 15 seconds before both stations reset.
+
+Station credentials are kept in browser memory rather than persistent storage:
+refreshing or explicitly logging out returns that screen to registration. Either
+solo practice can be skipped, but the final duel is never skippable and starts
+only when both connected stations are ready.
 The dashboard retains the latest 500 backend/station events in memory; systemd
 remains the durable source for service logs.
 

@@ -14,6 +14,8 @@ type RendererOptions = {
   preferences: Preferences;
   onDeadline: () => void;
   onRestart?: () => void;
+  onSkip?: () => void;
+  onLogout?: () => void;
 };
 
 const sides: readonly Side[] = ["L", "R"];
@@ -38,6 +40,9 @@ export class TypingRenderer {
   private endAt: number;
   private session: TypingSession | undefined;
   private frame = 0;
+  private layoutFrame = 0;
+  private readonly snapFrames = new Set<number>();
+  private disposed = false;
   private scrollOffset = 0;
   private readonly lastCaretTops = new Map<Side | "local", number>();
   private menuOpen = false;
@@ -64,7 +69,7 @@ export class TypingRenderer {
       <div class="live-stats" aria-label="Live duel statistics"></div>
       <!-- Adapted from Monkeytype's #restartTestButton. Its native position
            after the test preserves the original Tab + Enter interaction. -->
-      ${options.onRestart === undefined ? "" : '<button class="test-restart" type="button" aria-label="Restart Test"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></button>'}
+      ${options.onRestart === undefined ? "" : '<div class="test-actions"><button class="test-restart" type="button" aria-label="Restart Test"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg></button><button class="test-skip" type="button">skip to next round</button><button class="test-logout" type="button">logout</button></div>'}
     </section>`;
     this.test = mustElement(this.root, ".test");
     this.test.classList.toggle(
@@ -84,13 +89,21 @@ export class TypingRenderer {
     this.root
       .querySelector<HTMLButtonElement>(".test-restart")
       ?.addEventListener("click", () => options.onRestart?.());
+    this.root
+      .querySelector<HTMLButtonElement>(".test-skip")
+      ?.addEventListener("click", () => options.onSkip?.());
+    this.root
+      .querySelector<HTMLButtonElement>(".test-logout")
+      ?.addEventListener("click", () => options.onLogout?.());
 
     this.test.addEventListener("pointerdown", () => this.focus());
     this.test.addEventListener("focus", () => this.updateFocusState());
     this.test.addEventListener("blur", () => this.updateFocusState());
     window.addEventListener("resize", this.onResize);
     document.fonts.ready
-      .then(() => this.updatePositions(true))
+      .then(() => {
+        if (!this.disposed) this.updatePositions(true);
+      })
       .catch(() => undefined);
     this.startClock();
     if (!this.spectator) this.focus();
@@ -146,7 +159,10 @@ export class TypingRenderer {
         this.preferences.showGhost &&
         (this.spectator || side !== this.mySide);
       caret.hidden = !visible;
-      if (!visible || station === undefined) continue;
+      if (!visible || station === undefined) {
+        this.remoteIndexes.delete(side);
+        continue;
+      }
       this.remoteIndexes.set(side, station.cursorIndex);
       const label = caret.querySelector<HTMLElement>(".caret-label");
       if (label !== null) {
@@ -194,7 +210,11 @@ export class TypingRenderer {
   }
 
   dispose(): void {
+    this.disposed = true;
     cancelAnimationFrame(this.frame);
+    cancelAnimationFrame(this.layoutFrame);
+    for (const frame of this.snapFrames) cancelAnimationFrame(frame);
+    this.snapFrames.clear();
     window.removeEventListener("resize", this.onResize);
   }
 
@@ -305,7 +325,11 @@ export class TypingRenderer {
     caret.style.setProperty("--letter-width", `${targetRect.width}px`);
     this.lastCaretTops.set(owner, y);
     if (snap || lineChanged) {
-      requestAnimationFrame(() => caret.classList.remove("snap"));
+      const frame = requestAnimationFrame(() => {
+        this.snapFrames.delete(frame);
+        if (!this.disposed) caret.classList.remove("snap");
+      });
+      this.snapFrames.add(frame);
     }
   }
 
@@ -332,7 +356,9 @@ export class TypingRenderer {
   }
 
   private updatePositions(snap: boolean): void {
-    requestAnimationFrame(() => {
+    cancelAnimationFrame(this.layoutFrame);
+    this.layoutFrame = requestAnimationFrame(() => {
+      if (this.disposed) return;
       const localIndex = this.session?.typed.length ?? 0;
       if (!this.spectator) this.moveCaret("local", localIndex, snap);
       for (const side of sides) {

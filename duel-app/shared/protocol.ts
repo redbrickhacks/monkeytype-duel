@@ -68,6 +68,7 @@ export type ClientMessage =
   | { type: "claim"; side: Side; githubLogin: string }
   | { type: "practiceStart" }
   | { type: "practiceComplete" }
+  | { type: "skipPractice" }
   | { type: "ready"; ready: boolean }
   | {
       type: "progress";

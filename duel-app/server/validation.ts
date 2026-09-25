@@ -27,6 +27,7 @@ export function parseClientMessage(value: unknown): ClientMessage {
       return value as ClientMessage;
     case "practiceStart":
     case "practiceComplete":
+    case "skipPractice":
     case "release":
     case "rematch":
     case "activity":

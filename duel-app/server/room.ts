@@ -38,6 +38,7 @@ export class DuelRoom {
   private race?: RaceDefinition;
   private results: RaceResult[] = [];
   private phase: RoomSnapshot["phase"] = "registration";
+  private countdownTimer?: NodeJS.Timeout;
   private raceTimer?: NodeJS.Timeout;
   private resultsTimer?: NodeJS.Timeout;
   private resultsResetAt?: number;
@@ -64,6 +65,14 @@ export class DuelRoom {
     if (!client.side) return;
     const station = this.stations.get(client.side);
     if (station && station.token === client.token) {
+      if (
+        this.phase !== "countdown" &&
+        this.phase !== "racing" &&
+        this.phase !== "results"
+      ) {
+        this.release(client, "session ended on refresh or disconnect");
+        return;
+      }
       station.connected = false;
       station.socket = undefined;
       station.practiceActive = false;
@@ -189,15 +198,23 @@ export class DuelRoom {
         break;
       case "practiceComplete":
         if (!station.practiceActive) return;
-        station.practiceActive = false;
-        station.afkWarned = false;
-        station.practiceCount = Math.min(2, station.practiceCount + 1);
+        this.advancePractice(station);
+        break;
+      case "skipPractice":
         if (
-          [...this.stations.values()].some((item) => item.practiceCount >= 2)
+          station.practiceCount >= 2 ||
+          this.phase === "countdown" ||
+          this.phase === "racing" ||
+          this.phase === "results"
         ) {
-          this.phase = "lobby";
+          return;
         }
-        this.broadcast();
+        logEvent(
+          "info",
+          station.side,
+          `skipped practice ${station.practiceCount + 1}`,
+        );
+        this.advancePractice(station);
         break;
       case "ready":
         if (station.practiceCount < 2) {
@@ -243,19 +260,24 @@ export class DuelRoom {
     }
   }
 
-  release(client: Client): void {
-    if (!client.side || this.phase === "racing" || this.phase === "countdown") {
+  release(client: Client, reason = "logged out"): void {
+    if (
+      !client.side ||
+      this.phase === "racing" ||
+      this.phase === "countdown" ||
+      this.phase === "results"
+    ) {
       return;
     }
     const side = client.side;
     this.stations.delete(side);
     client.side = undefined;
     client.token = undefined;
-    this.phase = this.stations.size ? "registration" : "registration";
+    this.phase = "registration";
     this.results = [];
     this.race = undefined;
     this.clearRaceTimers();
-    logEvent("info", side, "station released");
+    logEvent("info", side, `station released: ${reason}`);
     this.broadcast();
   }
 
@@ -369,7 +391,9 @@ export class DuelRoom {
     clearTimeout(this.resultsTimer);
     logEvent("info", "backend", `race ${this.race.id} countdown started`);
     this.broadcast();
-    setTimeout(() => {
+    clearTimeout(this.countdownTimer);
+    this.countdownTimer = setTimeout(() => {
+      this.countdownTimer = undefined;
       if (this.phase === "countdown") {
         this.phase = "racing";
         this.broadcast();
@@ -446,6 +470,16 @@ export class DuelRoom {
     if (station.practiceActive) this.broadcast();
   }
 
+  private advancePractice(station: Station): void {
+    station.practiceActive = false;
+    station.afkWarned = false;
+    station.practiceCount = Math.min(2, station.practiceCount + 1);
+    if ([...this.stations.values()].some((item) => item.practiceCount >= 2)) {
+      this.phase = "lobby";
+    }
+    this.broadcast();
+  }
+
   private checkAfk(): void {
     const now = Date.now();
     for (const [side, station] of this.stations) {
@@ -467,9 +501,18 @@ export class DuelRoom {
   }
 
   private clearRaceTimers(): void {
+    clearTimeout(this.countdownTimer);
     clearTimeout(this.raceTimer);
     clearTimeout(this.resultsTimer);
+    this.countdownTimer = undefined;
+    this.raceTimer = undefined;
+    this.resultsTimer = undefined;
     this.resultsResetAt = undefined;
+  }
+
+  dispose(): void {
+    clearInterval(this.housekeepingTimer);
+    this.clearRaceTimers();
   }
 
   private resetRoom(reason: string): void {

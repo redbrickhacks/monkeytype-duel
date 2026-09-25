@@ -21,6 +21,9 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage({ type: "practiceStart" })).toEqual({
       type: "practiceStart",
     });
+    expect(parseClientMessage({ type: "skipPractice" })).toEqual({
+      type: "skipPractice",
+    });
     expect(
       parseClientMessage({
         type: "clientLog",

@@ -55,6 +55,7 @@ describe("competition actions", () => {
 
   it("allows non-race navigation and an existing spectator route", () => {
     expect(canLeaveStation("lobby")).toBe(true);
+    expect(canLeaveStation("results")).toBe(false);
     expect(canNavigateToSpectator("results", false)).toBe(true);
     expect(canNavigateToSpectator("racing", true)).toBe(true);
   });

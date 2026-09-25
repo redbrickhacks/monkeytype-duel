@@ -5,7 +5,7 @@ export function isActiveCompetition(phase: RoomPhase): boolean {
 }
 
 export function canLeaveStation(phase: RoomPhase): boolean {
-  return !isActiveCompetition(phase);
+  return !isActiveCompetition(phase) && phase !== "results";
 }
 
 export function canNavigateToSpectator(

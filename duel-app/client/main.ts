@@ -36,7 +36,8 @@ const toast = mustElement<HTMLElement>(document, "#toast");
 const connection = mustElement<HTMLElement>(document, "#connectionStatus");
 const afkOverlay = mustElement<HTMLElement>(document, "#afkOverlay");
 const afkCountdown = mustElement<HTMLElement>(document, "#afkCountdown");
-let socket: WebSocket;
+let socket: WebSocket | undefined;
+let reconnectTimer: number | undefined;
 let snapshot: RoomSnapshot = {
   phase: "registration",
   stations: {},
@@ -44,13 +45,14 @@ let snapshot: RoomSnapshot = {
   leaderboard: [],
   serverNow: Date.now(),
 };
-let stationToken = localStorage.getItem("duelStationToken") ?? undefined;
-let mySide: Side | undefined =
-  (localStorage.getItem("duelSide") as Side | null) ?? undefined;
+// Station identity deliberately lives in memory. Reloading the page logs the
+// kiosk out while an in-page WebSocket reconnect can still recover its session.
+localStorage.removeItem("duelStationToken");
+localStorage.removeItem("duelSide");
+let stationToken: string | undefined;
+let mySide: Side | undefined;
 let route: "station" | "spectator" =
-  mySide === undefined && location.hash === "#/spectate"
-    ? "spectator"
-    : "station";
+  location.hash === "#/spectate" ? "spectator" : "station";
 let typing: TypingSession | undefined;
 let practiceText = "";
 let practiceEndAt = 0;
@@ -70,10 +72,8 @@ let screenKey = "";
 let preferences = loadPreferences(globalThis.localStorage);
 let afkActive = false;
 let lastActivitySentAt = 0;
+let toastTimer = 0;
 applyPreferences(preferences);
-if (mySide !== undefined && location.hash === "#/spectate") {
-  history.replaceState(null, "", "#/");
-}
 
 function setPreferences(update: Partial<Preferences>): void {
   preferences = { ...preferences, ...update };
@@ -87,10 +87,15 @@ function setPreferences(update: Partial<Preferences>): void {
 }
 
 function connect(): void {
+  if (reconnectTimer !== undefined) {
+    window.clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  }
   connection.textContent = "connecting";
   connection.className = "connection pending";
-  socket = new WebSocket(wsUrl);
-  socket.addEventListener("open", () => {
+  const nextSocket = new WebSocket(wsUrl);
+  socket = nextSocket;
+  nextSocket.addEventListener("open", () => {
     connection.textContent = "connected";
     connection.className = "connection online";
     send({
@@ -99,7 +104,7 @@ function connect(): void {
       stationToken: route === "station" ? stationToken : undefined,
     });
   });
-  socket.addEventListener("message", (event) => {
+  nextSocket.addEventListener("message", (event) => {
     const message = JSON.parse(String(event.data)) as ServerMessage;
     if (message.type === "snapshot") {
       const previousPhase = snapshot.phase;
@@ -117,8 +122,6 @@ function connect(): void {
       mySide = message.side;
       finishSent = false;
       practiceCompletionCount = -1;
-      localStorage.setItem("duelStationToken", stationToken);
-      localStorage.setItem("duelSide", mySide);
       render();
     } else if (message.type === "error") {
       showToast(message.message, true);
@@ -126,10 +129,11 @@ function connect(): void {
       location.reload();
     }
   });
-  socket.addEventListener("close", () => {
+  nextSocket.addEventListener("close", () => {
+    if (socket !== nextSocket) return;
     connection.textContent = "offline";
     connection.className = "connection";
-    window.setTimeout(connect, 1500);
+    reconnectTimer = window.setTimeout(connect, 1500);
   });
 }
 
@@ -210,8 +214,6 @@ function syncSide(): void {
     stationToken !== undefined &&
     !snapshot.stations[mySide]
   ) {
-    localStorage.removeItem("duelStationToken");
-    localStorage.removeItem("duelSide");
     stationToken = undefined;
     mySide = undefined;
   }
@@ -348,11 +350,12 @@ function renderPractice(count: number): void {
     mountScreen(key);
     practiceCountdownFor = count;
     practiceAutoStartAt = Date.now() + 5_000;
-    view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide}</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private 30 second warm-up. Your opponent cannot see this result.</p><p class="practice-auto">starting in <strong id="practiceAutoCountdown">5</strong></p><button class="primary" id="startPractice">start now</button><button class="text-action" id="releaseStation">change station</button></section>`;
+    view.innerHTML = `<section class="center-stage"><p class="eyebrow">station ${mySide}</p><h2>practice ${count + 1} of 2</h2><p class="subtle">A private 30 second warm-up. Your opponent cannot see this result.</p><p class="practice-auto">starting in <strong id="practiceAutoCountdown">5</strong></p><button class="primary" id="startPractice">start now</button><button class="text-action" id="skipPractice">skip to next round</button><button class="text-action" id="logoutStation">logout</button></section>`;
     mustElement<HTMLButtonElement>(view, "#startPractice").onclick = () =>
       startPractice(count);
-    mustElement<HTMLButtonElement>(view, "#releaseStation").onclick = () =>
-      send({ type: "release" });
+    mustElement<HTMLButtonElement>(view, "#skipPractice").onclick = () =>
+      skipPractice();
+    mustElement<HTMLButtonElement>(view, "#logoutStation").onclick = logout;
   }
   updatePracticeCountdown(count);
 }
@@ -397,6 +400,21 @@ function restartPractice(): void {
   startPractice(me.practiceCount);
 }
 
+function skipPractice(): void {
+  const me = mySide ? snapshot.stations[mySide] : undefined;
+  if (me === undefined || me.practiceCount >= 2 || finishSent) return;
+  finishSent = true;
+  practiceCompletionCount = me.practiceCount;
+  typing = undefined;
+  mountPracticeCompleting(me.practiceCount);
+  send({ type: "skipPractice" });
+}
+
+function logout(): void {
+  if (!canLeaveStation(snapshot.phase)) return;
+  send({ type: "release" });
+}
+
 function mountPracticeCompleting(count: number): void {
   const key = `practice-completing-${count}`;
   if (screenKey === key) return;
@@ -409,11 +427,10 @@ function renderLobby(): void {
   const opponentSide: Side = mySide === "L" ? "R" : "L";
   const opponent = snapshot.stations[opponentSide];
   mountScreen("lobby");
-  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found" : "waiting for opponent"}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<div class="lobby-actions"><button class="primary ${me?.ready ? "ready" : ""}" id="readyButton">${me?.ready ? "ready ✓" : "ready up"}</button><button class="text-action" id="releaseStation">leave station</button></div>${leaderboardMarkup()}</section>`;
+  view.innerHTML = `<section class="lobby"><div class="lobby-head"><p class="eyebrow">duel lobby</p><h2>${opponent ? "opponent found" : "waiting for opponent"}</h2></div>${opponent ? `<div class="duelists">${stationCard("L")}<div class="versus">vs</div>${stationCard("R")}</div>` : waitingMonkey()}<div class="lobby-actions"><button class="primary ${me?.ready ? "ready" : ""}" id="readyButton">${me?.ready ? "ready ✓" : "ready up"}</button><button class="text-action" id="logoutStation">logout</button></div>${leaderboardMarkup()}</section>`;
   mustElement<HTMLButtonElement>(view, "#readyButton").onclick = () =>
     send({ type: "ready", ready: !me?.ready });
-  mustElement<HTMLButtonElement>(view, "#releaseStation").onclick = () =>
-    send({ type: "release" });
+  mustElement<HTMLButtonElement>(view, "#logoutStation").onclick = logout;
 }
 
 function renderRace(spectator: boolean): void {
@@ -469,6 +486,12 @@ function renderTypingView(
         !spectator && identity.startsWith("practice-")
           ? restartPractice
           : undefined,
+      onSkip:
+        !spectator && identity.startsWith("practice-")
+          ? skipPractice
+          : undefined,
+      onLogout:
+        !spectator && identity.startsWith("practice-") ? logout : undefined,
     });
     if (typing && !spectator) renderer.attachSession(typing);
     renderer.setMenuOpen(commandMenu.isOpen);
@@ -599,9 +622,10 @@ function makePracticeText(): string {
   ).join(" ");
 }
 function showToast(message: string, error = false): void {
+  window.clearTimeout(toastTimer);
   toast.textContent = message;
   toast.className = error ? "show error" : "show";
-  window.setTimeout(() => (toast.className = ""), 3500);
+  toastTimer = window.setTimeout(() => (toast.className = ""), 3500);
 }
 function escapeHtml(value: string): string {
   const entities: Record<string, string> = {
@@ -761,18 +785,20 @@ function commandInventory(): Command[] {
           },
         },
         {
-          id: "leave",
-          name: "leave / change station",
-          disabled: activeRace || !me,
-          action: () => {
-            if (
-              canLeaveStation(snapshot.phase) &&
-              mySide &&
-              snapshot.stations[mySide]
-            ) {
-              send({ type: "release" });
-            }
-          },
+          id: "skip-practice",
+          name: "skip to next round",
+          disabled:
+            !me ||
+            me.practiceCount >= 2 ||
+            activeRace ||
+            snapshot.phase === "results",
+          action: skipPractice,
+        },
+        {
+          id: "logout",
+          name: "logout",
+          disabled: !me || !canLeaveStation(snapshot.phase),
+          action: logout,
         },
         {
           id: "rematch",

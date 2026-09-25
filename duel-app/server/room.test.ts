@@ -143,6 +143,54 @@ describe("DuelRoom", () => {
     expect(room.snapshot().phase).toBe("lobby");
   });
 
+  it("can skip practice rounds but never skips the synchronized final", () => {
+    const database = {
+      saveProfile: vi.fn(),
+      leaderboard: vi.fn(() => []),
+      saveRace: vi.fn(),
+    };
+    const room = new DuelRoom(database as never, ["type"]);
+    const client = room.addClient(new FakeSocket() as never);
+    room.claim(client, "L", left);
+    room.handle(client, { type: "skipPractice" });
+    expect(room.snapshot().stations.L?.practiceCount).toBe(1);
+    room.handle(client, { type: "skipPractice" });
+    expect(room.snapshot().stations.L?.practiceCount).toBe(2);
+    expect(room.snapshot().phase).toBe("lobby");
+    room.handle(client, { type: "skipPractice" });
+    expect(room.snapshot().stations.L?.practiceCount).toBe(2);
+    expect(room.snapshot().race).toBeUndefined();
+  });
+
+  it("drops a refreshed practice session but preserves an active final", () => {
+    const database = {
+      saveProfile: vi.fn(),
+      leaderboard: vi.fn(() => []),
+      saveRace: vi.fn(),
+    };
+    const room = new DuelRoom(database as never, ["type"]);
+    const practiceClient = room.addClient(new FakeSocket() as never);
+    room.claim(practiceClient, "L", left);
+    room.removeClient(practiceClient);
+    expect(room.snapshot().stations.L).toBeUndefined();
+
+    const leftClient = room.addClient(new FakeSocket() as never);
+    const rightClient = room.addClient(new FakeSocket() as never);
+    room.claim(leftClient, "L", left);
+    room.claim(rightClient, "R", right);
+    for (let index = 0; index < 2; index++) {
+      room.handle(leftClient, { type: "skipPractice" });
+      room.handle(rightClient, { type: "skipPractice" });
+    }
+    room.handle(leftClient, { type: "ready", ready: true });
+    room.handle(rightClient, { type: "ready", ready: true });
+    expect(room.snapshot().phase).toBe("countdown");
+    room.removeClient(leftClient);
+    expect(room.snapshot().stations.L).toBeDefined();
+    expect(room.snapshot().stations.L?.connected).toBe(false);
+    expect(room.snapshot().phase).toBe("countdown");
+  });
+
   it("clears both stations 15 seconds after race results", () => {
     const database = {
       saveProfile: vi.fn(),

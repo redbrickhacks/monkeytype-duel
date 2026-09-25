@@ -121,6 +121,10 @@ export class DuelDatabase {
         };
       });
   }
+
+  close(): void {
+    this.db.close();
+  }
 }
 
 function mapProfile(row: Record<string, unknown>): PublicProfile {

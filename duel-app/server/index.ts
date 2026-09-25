@@ -195,6 +195,7 @@ server.listen(port, host, () =>
 
 function shutdown(signal: string): void {
   logEvent("info", "backend", `shutting down (${signal})`);
+  room.dispose();
   server.close();
   for (const socket of sockets.clients) {
     socket.close(1012, "Service restarting");
@@ -203,6 +204,7 @@ function shutdown(signal: string): void {
     for (const socket of sockets.clients) {
       socket.terminate();
     }
+    database.close();
     process.exit(0);
   }, 500).unref();
 }
