@@ -285,4 +285,49 @@ describe("DuelRoom", () => {
     expect(room.snapshot().phase).toBe("registration");
     expect(room.snapshot().stations).toEqual({});
   });
+
+  it("coalesces rapid progress telemetry into one broadcast", () => {
+    const database = {
+      saveProfile: vi.fn(),
+      leaderboard: vi.fn(() => []),
+      saveRace: vi.fn(),
+    };
+    const room = new DuelRoom(database as never, ["type"]);
+    const leftSocket = new FakeSocket();
+    const rightSocket = new FakeSocket();
+    const leftClient = room.addClient(leftSocket as never);
+    const rightClient = room.addClient(rightSocket as never);
+    reserveAndClaim(room, leftClient, "L", left);
+    reserveAndClaim(room, rightClient, "R", right);
+    for (let index = 0; index < 2; index++) {
+      room.handle(leftClient, { type: "skipPractice" });
+      room.handle(rightClient, { type: "skipPractice" });
+    }
+    vi.advanceTimersByTime(10_000);
+    const messagesBeforeProgress = rightSocket.messages.length;
+    room.handle(leftClient, {
+      type: "progress",
+      sequence: 1,
+      cursorIndex: 4,
+      wpm: 80,
+      raw: 84,
+      accuracy: 98,
+    });
+    room.handle(leftClient, {
+      type: "progress",
+      sequence: 2,
+      cursorIndex: 8,
+      wpm: 82,
+      raw: 86,
+      accuracy: 97,
+    });
+    expect(rightSocket.messages).toHaveLength(messagesBeforeProgress);
+    vi.advanceTimersByTime(50);
+    expect(rightSocket.messages).toHaveLength(messagesBeforeProgress + 1);
+    expect(room.snapshot().stations.L).toMatchObject({
+      cursorIndex: 8,
+      wpm: 82,
+      rawWpm: 86,
+    });
+  });
 });

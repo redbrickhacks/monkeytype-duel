@@ -9,6 +9,7 @@ import type {
   Side,
 } from "../shared/protocol";
 import { TypingSession } from "./typing";
+import { typingActionFromKey } from "./typing-key";
 import { CommandMenu, type Command } from "./command-menu";
 import {
   applyPreferences,
@@ -1062,16 +1063,10 @@ window.addEventListener("keydown", (event) => {
   ) {
     return;
   }
-  if (
-    event.ctrlKey ||
-    event.metaKey ||
-    event.altKey ||
-    (event.key.length !== 1 && event.key !== "Backspace")
-  ) {
-    return;
-  }
+  const action = typingActionFromKey(event);
+  if (action === null) return;
   event.preventDefault();
-  const stats = typing.input(event.key);
+  const stats = typing.input(action);
   renderer?.updateTyping(stats);
   if (snapshot.phase === "racing" && ++progressSequence % 2 === 0) {
     send({

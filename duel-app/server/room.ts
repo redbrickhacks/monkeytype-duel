@@ -51,6 +51,7 @@ export class DuelRoom {
   private phase: RoomSnapshot["phase"] = "registration";
   private countdownTimer?: NodeJS.Timeout;
   private raceTimer?: NodeJS.Timeout;
+  private progressBroadcastTimer?: NodeJS.Timeout;
   private resultsTimer?: NodeJS.Timeout;
   private resultsResetAt?: number;
   private readonly housekeepingTimer: NodeJS.Timeout;
@@ -259,7 +260,7 @@ export class DuelRoom {
         station.wpm = Math.max(0, message.wpm);
         station.rawWpm = Math.max(0, message.raw ?? message.wpm);
         station.accuracy = Math.max(0, Math.min(100, message.accuracy));
-        this.broadcast();
+        this.scheduleProgressBroadcast();
         break;
       case "finish":
         this.finish(station, message.result);
@@ -564,9 +565,11 @@ export class DuelRoom {
     clearTimeout(this.countdownTimer);
     clearTimeout(this.raceTimer);
     clearTimeout(this.resultsTimer);
+    clearTimeout(this.progressBroadcastTimer);
     this.countdownTimer = undefined;
     this.raceTimer = undefined;
     this.resultsTimer = undefined;
+    this.progressBroadcastTimer = undefined;
     this.resultsResetAt = undefined;
   }
 
@@ -596,6 +599,15 @@ export class DuelRoom {
       snapshot: this.snapshot(),
     };
     for (const client of this.clients) this.send(client, message);
+  }
+
+  private scheduleProgressBroadcast(): void {
+    if (this.progressBroadcastTimer !== undefined) return;
+    this.progressBroadcastTimer = setTimeout(() => {
+      this.progressBroadcastTimer = undefined;
+      if (this.phase === "racing") this.broadcast();
+    }, 50);
+    this.progressBroadcastTimer.unref();
   }
 
   private send(client: Client, message: ServerMessage): void {

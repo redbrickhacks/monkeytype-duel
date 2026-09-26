@@ -29,6 +29,8 @@ export class TypingRenderer {
   private readonly onDeadline: () => void;
   private readonly letters: HTMLElement[] = [];
   private readonly words: HTMLElement[] = [];
+  private readonly wordLetters: HTMLElement[][] = [];
+  private readonly extraLetters: HTMLElement[] = [];
   private readonly carets = new Map<Side | "local", HTMLElement>();
   private readonly stats = new Map<Side, HTMLElement>();
   private readonly test: HTMLElement;
@@ -44,10 +46,12 @@ export class TypingRenderer {
   private readonly snapFrames = new Set<number>();
   private disposed = false;
   private scrollOffset = 0;
+  private lineHeight = 0;
   private readonly lastCaretTops = new Map<Side | "local", number>();
   private menuOpen = false;
   private deadlineHandled = false;
-  private previousTypedLength = 0;
+  private readonly renderedInputs: string[] = [];
+  private readonly renderedCommitted: boolean[] = [];
   private remoteIndexes = new Map<Side, number>();
 
   constructor(options: RendererOptions) {
@@ -115,22 +119,49 @@ export class TypingRenderer {
   }
 
   updateTyping(stats: TypingStats): void {
-    const typed = this.session?.typed ?? [];
-    const from = Math.min(this.previousTypedLength, typed.length);
-    const to = Math.max(this.previousTypedLength, typed.length);
-    for (let index = from; index <= to; index++) {
-      const letter = this.letters[index];
-      if (letter === undefined) continue;
-      letter.classList.toggle(
-        "correct",
-        index < typed.length && typed[index] === this.text[index],
-      );
-      letter.classList.toggle(
-        "incorrect",
-        index < typed.length && typed[index] !== this.text[index],
-      );
+    for (const [wordIndex, state] of (
+      this.session?.wordStates() ?? []
+    ).entries()) {
+      if (
+        this.renderedInputs[wordIndex] === state.input &&
+        this.renderedCommitted[wordIndex] === state.committed
+      ) {
+        continue;
+      }
+      const letters = this.wordLetters[wordIndex] ?? [];
+      for (let index = 0; index < letters.length; index++) {
+        const input = state.input[index];
+        const letter = letters[index];
+        if (letter === undefined) continue;
+        letter.classList.toggle(
+          "correct",
+          input !== undefined && input === state.target[index],
+        );
+        letter.classList.toggle(
+          "incorrect",
+          input !== undefined && input !== state.target[index],
+        );
+        letter.classList.toggle(
+          "missed",
+          state.committed && input === undefined,
+        );
+      }
+      const extraRoot = this.extraLetters[wordIndex];
+      if (extraRoot !== undefined) {
+        extraRoot.replaceChildren(
+          ...Array.from(state.input.slice(state.target.length)).map(
+            (character) => {
+              const extra = document.createElement("span");
+              extra.className = "letter extra incorrect";
+              extra.textContent = character;
+              return extra;
+            },
+          ),
+        );
+      }
+      this.renderedInputs[wordIndex] = state.input;
+      this.renderedCommitted[wordIndex] = state.committed;
     }
-    this.previousTypedLength = typed.length;
     this.ownWpm.textContent = `${Math.round(stats.wpm)} wpm`;
     this.ownWpm.hidden = !this.preferences.showLiveInfo || this.spectator;
     this.moveCaret("local", stats.cursorIndex);
@@ -174,7 +205,10 @@ export class TypingRenderer {
       const lead = Math.max(...this.remoteIndexes.values());
       const target = this.letters[Math.min(lead, this.letters.length - 1)];
       if (target !== undefined) {
-        this.adjustScroll(target);
+        this.adjustScroll(
+          target.getBoundingClientRect(),
+          this.track.getBoundingClientRect(),
+        );
       }
     }
   }
@@ -220,6 +254,7 @@ export class TypingRenderer {
 
   private readonly onResize = (): void => {
     this.scrollOffset = 0;
+    this.lineHeight = 0;
     this.track.style.transform = "translateY(0)";
     for (const word of this.words) {
       word.classList.remove("above-scroll");
@@ -234,9 +269,17 @@ export class TypingRenderer {
       const word = document.createElement("span");
       word.className = "word";
       this.words.push(word);
+      const targetLetters: HTMLElement[] = [];
       for (const character of words[wordIndex] ?? "") {
-        word.append(this.makeLetter(character, characterIndex++));
+        const letter = this.makeLetter(character, characterIndex++);
+        targetLetters.push(letter);
+        word.append(letter);
       }
+      this.wordLetters.push(targetLetters);
+      const extras = document.createElement("span");
+      extras.className = "extra-letters";
+      this.extraLetters.push(extras);
+      word.append(extras);
       if (wordIndex < words.length - 1) {
         word.append(this.makeLetter(" ", characterIndex++));
       }
@@ -313,9 +356,9 @@ export class TypingRenderer {
     if (caret === undefined || target === undefined) return;
     caret.dataset.index = String(index);
 
-    if (owner === "local") this.adjustScroll(target);
     const targetRect = target.getBoundingClientRect();
     const trackRect = this.track.getBoundingClientRect();
+    if (owner === "local") this.adjustScroll(targetRect, trackRect);
     // Letters are inside inline word wrappers while carets are positioned on
     // the full track, so calculate both in the track's coordinate space.
     const x = targetRect.left - trackRect.left;
@@ -336,25 +379,27 @@ export class TypingRenderer {
     }
   }
 
-  private adjustScroll(target: HTMLElement): void {
-    const lineHeight =
-      Number.parseFloat(getComputedStyle(this.track).lineHeight) ||
-      target.getBoundingClientRect().height;
-    const trackRect = this.track.getBoundingClientRect();
+  private adjustScroll(targetRect: DOMRect, trackRect: DOMRect): void {
+    if (this.lineHeight <= 0) {
+      this.lineHeight =
+        Number.parseFloat(getComputedStyle(this.track).lineHeight) ||
+        targetRect.height;
+    }
     const firstLetter = this.letters[0];
     const firstLineTop =
       firstLetter !== undefined
         ? firstLetter.getBoundingClientRect().top - trackRect.top
         : 0;
-    const targetTop = target.getBoundingClientRect().top - trackRect.top;
+    const targetTop = targetRect.top - trackRect.top;
     const line = Math.max(
       0,
-      Math.round((targetTop - firstLineTop) / lineHeight),
+      Math.round((targetTop - firstLineTop) / this.lineHeight),
     );
-    const nextOffset = Math.max(0, (line - 1) * lineHeight);
+    const nextOffset = Math.max(0, (line - 1) * this.lineHeight);
     if (Math.abs(nextOffset - this.scrollOffset) < 1) return;
     this.scrollOffset = nextOffset;
-    const firstVisibleTop = firstLineTop + Math.max(0, line - 1) * lineHeight;
+    const firstVisibleTop =
+      firstLineTop + Math.max(0, line - 1) * this.lineHeight;
     for (const word of this.words) {
       const wordTop = word.getBoundingClientRect().top - trackRect.top;
       word.classList.toggle("above-scroll", wordTop < firstVisibleTop - 1);
@@ -366,7 +411,7 @@ export class TypingRenderer {
     cancelAnimationFrame(this.layoutFrame);
     this.layoutFrame = requestAnimationFrame(() => {
       if (this.disposed) return;
-      const localIndex = this.session?.typed.length ?? 0;
+      const localIndex = this.session?.stats().cursorIndex ?? 0;
       if (!this.spectator) this.moveCaret("local", localIndex, snap);
       for (const side of sides) {
         const caret = this.carets.get(side);

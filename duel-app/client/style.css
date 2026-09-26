@@ -689,6 +689,18 @@ label {
 .letter.incorrect {
   color: var(--error);
 }
+.letter.missed {
+  color: var(--error);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--error) 55%, transparent);
+  text-underline-offset: 0.2em;
+}
+.extra-letters {
+  display: inline;
+}
+.letter.extra {
+  opacity: 0.8;
+}
 .letter.own-caret::before {
   content: "";
   position: absolute;
