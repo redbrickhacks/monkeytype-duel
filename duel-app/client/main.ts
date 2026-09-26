@@ -25,6 +25,8 @@ import {
   canNavigateToSpectator,
   isActiveCompetition,
 } from "./competition";
+import wordCorpus from "../server/data/english_1k.json";
+import { createTypingText } from "../shared/text";
 
 const apiUrl =
   (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ??
@@ -773,14 +775,7 @@ function eventBriefing(): string {
 }
 
 function makePracticeText(): string {
-  const bank =
-    "the of to and a in is it you that for on are with this from have be at one word type quick light world find new work part place made live where after back only round good every think help line turn same move right want air play small end home read hand large add land here must high follow change light kind need build head stand page found school learn cover food sun between state keep never last city tree start story".split(
-      " ",
-    );
-  return Array.from(
-    { length: 120 },
-    () => bank[Math.floor(Math.random() * bank.length)],
-  ).join(" ");
+  return createTypingText(wordCorpus.words);
 }
 function showToast(message: string, error = false): void {
   window.clearTimeout(toastTimer);

@@ -53,6 +53,7 @@ export class TypingRenderer {
   private readonly renderedInputs: string[] = [];
   private readonly renderedCommitted: boolean[] = [];
   private remoteIndexes = new Map<Side, number>();
+  private localIndex: number | undefined;
 
   constructor(options: RendererOptions) {
     this.root = options.root;
@@ -164,10 +165,14 @@ export class TypingRenderer {
     }
     this.ownWpm.textContent = `${Math.round(stats.wpm)} wpm`;
     this.ownWpm.hidden = !this.preferences.showLiveInfo || this.spectator;
-    this.moveCaret("local", stats.cursorIndex);
+    if (this.localIndex !== stats.cursorIndex) {
+      this.localIndex = stats.cursorIndex;
+      this.moveCaret("local", stats.cursorIndex);
+    }
   }
 
   updateRemote(stations: Partial<Record<Side, StationState>>): void {
+    let positionChanged = false;
     for (const side of sides) {
       const station = stations[side];
       const stat = this.stats.get(side);
@@ -191,17 +196,21 @@ export class TypingRenderer {
         (this.spectator || side !== this.mySide);
       caret.hidden = !visible;
       if (!visible || station === undefined) {
-        this.remoteIndexes.delete(side);
+        positionChanged = this.remoteIndexes.delete(side) || positionChanged;
         continue;
       }
+      const previousIndex = this.remoteIndexes.get(side);
       this.remoteIndexes.set(side, station.cursorIndex);
       const label = caret.querySelector<HTMLElement>(".caret-label");
       if (label !== null) {
         label.textContent = `${side} ${station.profile.displayName}`;
       }
-      this.moveCaret(side, station.cursorIndex);
+      if (previousIndex !== station.cursorIndex) {
+        positionChanged = true;
+        this.moveCaret(side, station.cursorIndex);
+      }
     }
-    if (this.spectator && this.remoteIndexes.size) {
+    if (this.spectator && positionChanged && this.remoteIndexes.size) {
       const lead = Math.max(...this.remoteIndexes.values());
       const target = this.letters[Math.min(lead, this.letters.length - 1)];
       if (target !== undefined) {

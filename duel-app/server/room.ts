@@ -12,6 +12,7 @@ import type {
 } from "../shared/protocol.js";
 import type { DuelDatabase } from "./database.js";
 import { logEvent } from "./logger.js";
+import { createTypingText } from "../shared/text.js";
 
 type Client = {
   socket: WebSocket;
@@ -418,7 +419,7 @@ export class DuelRoom {
     this.results = [];
     this.race = {
       id: randomUUID(),
-      text: createRaceText(this.words),
+      text: createTypingText(this.words),
       startAt: Date.now() + FINAL_COUNTDOWN_MS,
       durationSeconds: this.durationSeconds,
     };
@@ -696,14 +697,6 @@ export class DuelRoom {
     }
     if (changed) this.broadcast();
   }
-}
-
-function createRaceText(words: string[], count = 120): string {
-  const chosen: string[] = [];
-  for (let index = 0; index < count; index++) {
-    chosen.push(words[Math.floor(Math.random() * words.length)] ?? "type");
-  }
-  return chosen.join(" ");
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

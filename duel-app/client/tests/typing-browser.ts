@@ -2,6 +2,7 @@ import { defaultPreferences } from "../preferences";
 import { typingActionFromKey } from "../typing-key";
 import { TypingRenderer } from "../typing-renderer";
 import { TypingSession } from "../typing";
+import type { StationState } from "../../shared/protocol";
 
 const result = mustElement<HTMLElement>("#result");
 const fixture = mustElement<HTMLElement>("#fixture");
@@ -64,6 +65,49 @@ try {
     "an insertion does not shift the following word",
   );
   insertionRenderer.dispose();
+
+  fixture.replaceChildren();
+  const telemetrySession = new TypingSession("the quick brown", 0);
+  type(telemetrySession, "the");
+  const telemetryRenderer = render(telemetrySession, "telemetry");
+  const originalRect = HTMLElement.prototype.getBoundingClientRect;
+  let layoutReads = 0;
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    layoutReads++;
+    const rect = originalRect.call(this) as DOMRect;
+    return rect;
+  };
+  telemetryRenderer.updateTyping(telemetrySession.stats(30_000));
+  assert(
+    layoutReads === 0,
+    "an unchanged local cursor does not trigger layout measurement",
+  );
+
+  const remote: StationState = {
+    side: "R",
+    profile: {
+      githubId: 1,
+      login: "opponent",
+      displayName: "Opponent",
+      avatarUrl: "",
+    },
+    practiceCount: 2,
+    ready: true,
+    connected: true,
+    cursorIndex: 4,
+    wpm: 100,
+    rawWpm: 105,
+    accuracy: 98,
+  };
+  telemetryRenderer.updateRemote({ R: remote });
+  layoutReads = 0;
+  telemetryRenderer.updateRemote({ R: { ...remote, wpm: 101 } });
+  assert(
+    layoutReads === 0,
+    "telemetry-only updates do not remeasure an unchanged ghost cursor",
+  );
+  HTMLElement.prototype.getBoundingClientRect = originalRect;
+  telemetryRenderer.dispose();
 
   const shortcut = typingActionFromKey(
     new KeyboardEvent("keydown", { key: "Backspace", ctrlKey: true }),
