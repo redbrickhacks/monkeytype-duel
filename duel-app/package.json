@@ -11,6 +11,7 @@
     "build:web": "vite build",
     "start": "node dist-server/server/index.js",
     "test": "vitest run --config vitest.config.ts",
+    "test:e2e": "playwright test",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.3",
     "@types/node": "^24.5.2",
