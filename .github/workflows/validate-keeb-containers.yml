@@ -1,0 +1,24 @@
+name: Validate keeb containers
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - "duel-app/**"
+      - ".github/workflows/validate-keeb-containers.yml"
+  pull_request:
+    paths:
+      - "duel-app/**"
+      - ".github/workflows/validate-keeb-containers.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f duel-app/compose.yaml build

@@ -1,0 +1,45 @@
+name: monkeytype-duel
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: ${PUBLIC_API_URL:-https://api.keeb.makerspace.tools}
+    image: monkeytype-duel-frontend:local
+    container_name: monkeytype-duel-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_BIND:-0.0.0.0}:${FRONTEND_PORT:-8080}:80"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: monkeytype-duel-backend:local
+    container_name: monkeytype-duel-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_PATH: /data/duel.sqlite
+    ports:
+      - "${BACKEND_BIND:-0.0.0.0}:${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ./data:/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
